@@ -489,7 +489,7 @@ export function ContinuousCalendar() {
                                         </div>
                                     )}
 
-                                    <div className="grid grid-cols-7 gap-1 mb-2">
+                                    <div className="grid grid-cols-7 gap-1 mb-2 md:mb-0">
                                         {week.map((day, dayIndex) => {
                                             if (!day) {
                                                 return <div key={dayIndex} className="h-12 md:h-16" />;
@@ -508,7 +508,7 @@ export function ContinuousCalendar() {
                                             return (
                                                 <div
                                                     key={`${day.year}-${day.month}-${day.day}`}
-                                                    className="relative h-12 md:h-16 w-full flex justify-center align-center"
+                                                    className="relative h-12 w-full md:h-16 md:w-16 flex justify-center align-center items-center"
                                                     data-date={`${day.year}-${day.month}-${day.day}`}
                                                 >
                                                     {/* Day cell */}
@@ -546,9 +546,11 @@ export function ContinuousCalendar() {
                     {monthPositions.map((monthPos) => (
                         <div
                             key={`${monthPos.year}-${monthPos.monthName}`}
-                            className="absolute left-0"
+                            data-month={`${monthPos.year}-${monthPos.monthName}`}
+                            data-week={`${monthPos.weekIndex}`}
+                            className="absolute left-0 h-16 flex flex-col items-start justify-center"
                             style={{
-                                top: `${monthPos.weekIndex * 64 + 64 + 4}px`, // 64px per week row + header height + offset
+                                top: `${monthPos.weekIndex * 64}px`, // 64px (md:h-16) + 2px (mb-2) per week row + offset
                             }}
                         >
                             <div
