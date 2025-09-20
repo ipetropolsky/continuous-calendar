@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface CalendarDay {
     date: Date;
@@ -20,6 +20,7 @@ interface DateInterval {
 export function ContinuousCalendar() {
     const [intervals, setIntervals] = useState<DateInterval[]>([]);
     const [selectedStart, setSelectedStart] = useState<Date | null>(null);
+    const [isInitialized, setIsInitialized] = useState(false);
     // Check if a date is a holiday
     const isHoliday = (date: Date): boolean => {
         const year = date.getFullYear();
@@ -179,6 +180,85 @@ export function ContinuousCalendar() {
     };
 
     const monthPositions = getMonthPositions();
+
+    // URL encoding/decoding functions
+    const encodeIntervalsToURL = (intervals: DateInterval[]): string => {
+        if (intervals.length === 0) return '';
+
+        return intervals
+            .map((interval) => {
+                const startStr = formatDateToString(interval.startDate);
+                const endStr = formatDateToString(interval.endDate);
+                return `${startStr}-${endStr}`;
+            })
+            .join(',');
+    };
+
+    const decodeIntervalsFromURL = (urlParam: string): DateInterval[] => {
+        if (!urlParam) return [];
+
+        try {
+            return urlParam
+                .split(',')
+                .map((intervalStr) => {
+                    const [startStr, endStr] = intervalStr.split('-');
+                    return {
+                        id: `${Date.now()}-${Math.random()}`,
+                        startDate: parseStringToDate(startStr),
+                        endDate: parseStringToDate(endStr),
+                    };
+                })
+                .filter((interval) => interval.startDate && interval.endDate);
+        } catch {
+            return [];
+        }
+    };
+
+    const formatDateToString = (date: Date): string => {
+        const year = date.getFullYear().toString().slice(-2); // Last 2 digits of year
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const day = date.getDate().toString().padStart(2, '0');
+        return `${year}${month}${day}`;
+    };
+
+    const parseStringToDate = (dateStr: string): Date => {
+        if (dateStr.length !== 6) throw new Error('Invalid date format');
+
+        const year = parseInt(`20${dateStr.slice(0, 2)}`);
+        const month = parseInt(dateStr.slice(2, 4)) - 1; // Month is 0-indexed
+        const day = parseInt(dateStr.slice(4, 6));
+
+        return new Date(year, month, day);
+    };
+
+    // Parse URL on component mount
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const datesParam = urlParams.get('dates');
+
+        if (datesParam) {
+            const parsedIntervals = decodeIntervalsFromURL(datesParam);
+            setIntervals(parsedIntervals);
+        }
+        setIsInitialized(true);
+    }, []);
+
+    // Update URL when intervals change (only after initialization)
+    useEffect(() => {
+        if (!isInitialized) return;
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const encodedDates = encodeIntervalsToURL(intervals);
+
+        if (encodedDates) {
+            urlParams.set('dates', encodedDates);
+        } else {
+            urlParams.delete('dates');
+        }
+
+        const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
+        window.history.replaceState({}, '', newUrl);
+    }, [intervals, isInitialized]);
 
     // Helper functions for interval selection
     const handleDateClick = (date: Date) => {
