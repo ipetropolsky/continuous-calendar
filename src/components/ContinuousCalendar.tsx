@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 interface CalendarDay {
     date: Date;
     day: number;
@@ -9,7 +11,15 @@ interface CalendarDay {
     isHoliday: boolean;
 }
 
+interface DateInterval {
+    id: string;
+    startDate: Date;
+    endDate: Date;
+}
+
 export function ContinuousCalendar() {
+    const [intervals, setIntervals] = useState<DateInterval[]>([]);
+    const [selectedStart, setSelectedStart] = useState<Date | null>(null);
     // Check if a date is a holiday
     const isHoliday = (date: Date): boolean => {
         const year = date.getFullYear();
@@ -170,6 +180,62 @@ export function ContinuousCalendar() {
 
     const monthPositions = getMonthPositions();
 
+    // Helper functions for interval selection
+    const handleDateClick = (date: Date) => {
+        if (!selectedStart) {
+            // First click - select start date
+            setSelectedStart(date);
+        } else {
+            // Second click - create interval
+            const startDate = selectedStart;
+            const endDate = date;
+
+            // Ensure start is before end
+            const sortedStart = startDate <= endDate ? startDate : endDate;
+            const sortedEnd = startDate <= endDate ? endDate : startDate;
+
+            const newInterval: DateInterval = {
+                id: `${Date.now()}-${Math.random()}`,
+                startDate: sortedStart,
+                endDate: sortedEnd,
+            };
+
+            setIntervals((prev) => [...prev, newInterval]);
+            setSelectedStart(null);
+        }
+    };
+
+    const removeInterval = (intervalId: string) => {
+        setIntervals((prev) => prev.filter((interval) => interval.id !== intervalId));
+    };
+
+    // Check if a date is in any interval
+    const getDateStatus = (date: Date) => {
+        const dateTime = date.getTime();
+
+        // Check if date is selected as start
+        if (selectedStart && selectedStart.getTime() === dateTime) {
+            return { isSelected: true, isInInterval: false, intervalId: null, isIntervalEnd: false };
+        }
+
+        // Check if date is in any interval
+        for (const interval of intervals) {
+            const startTime = interval.startDate.getTime();
+            const endTime = interval.endDate.getTime();
+
+            if (dateTime >= startTime && dateTime <= endTime) {
+                return {
+                    isSelected: false,
+                    isInInterval: true,
+                    intervalId: interval.id,
+                    isIntervalEnd: dateTime === endTime,
+                };
+            }
+        }
+
+        return { isSelected: false, isInInterval: false, intervalId: null, isIntervalEnd: false };
+    };
+
     return (
         <div className="w-full max-w-7xl mx-auto p-8">
             <div className="mb-8 text-center">
@@ -201,19 +267,41 @@ export function ContinuousCalendar() {
                                         return <div key={dayIndex} className="h-16" />;
                                     }
 
-                                    const dayStyle = day.isWorkingDay
-                                        ? { fontSize: '30px', color: '#aaaaaa' }
-                                        : { fontSize: '30px' };
+                                    const dayClass = day.isWorkingDay ? 'text-gray-400' : 'text-black';
+
+                                    const dateStatus = getDateStatus(day.date);
+
+                                    // Determine background colors based on selection status
+                                    let bgClass = 'hover:bg-gray-100';
+                                    if (dateStatus.isSelected || dateStatus.isInInterval) {
+                                        bgClass = 'bg-slate-500 hover:bg-slate-600 text-zinc-50';
+                                    }
 
                                     return (
-                                        <div key={`${day.year}-${day.month}-${day.day}`} className="relative">
+                                        <div
+                                            key={`${day.year}-${day.month}-${day.day}`}
+                                            className="relative h-16 w-16 flex justify-center align-center"
+                                        >
                                             {/* Day cell */}
                                             <div
-                                                className="h-16 w-16 flex items-center justify-center hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
-                                                style={dayStyle}
+                                                className={`h-14 w-14 flex items-center justify-center text-3xl ${bgClass} ${dayClass} rounded-full transition-colors cursor-pointer`}
+                                                onClick={() => handleDateClick(day.date)}
                                             >
                                                 {day.day}
                                             </div>
+
+                                            {/* Delete button for interval end dates */}
+                                            {dateStatus.isIntervalEnd && (
+                                                <button
+                                                    className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs hover:bg-red-600 flex items-center justify-center cursor-pointer"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        removeInterval(dateStatus.intervalId!);
+                                                    }}
+                                                >
+                                                    ×
+                                                </button>
+                                            )}
                                         </div>
                                     );
                                 })}
@@ -229,7 +317,7 @@ export function ContinuousCalendar() {
                             key={`${monthPos.year}-${monthPos.monthName}`}
                             className="absolute left-0"
                             style={{
-                                top: `${monthPos.weekIndex * 64 + 64 + 8}px`, // 64px per week row + header height + offset
+                                top: `${monthPos.weekIndex * 64 + 64 + 4}px`, // 64px per week row + header height + offset
                             }}
                         >
                             <div className="text-sm font-medium text-gray-700">{monthPos.monthName}</div>
