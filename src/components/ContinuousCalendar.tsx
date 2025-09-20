@@ -21,6 +21,8 @@ export function ContinuousCalendar() {
     const [intervals, setIntervals] = useState<DateInterval[]>([]);
     const [selectedStart, setSelectedStart] = useState<Date | null>(null);
     const [isInitialized, setIsInitialized] = useState(false);
+    const [shouldScrollToFirst, setShouldScrollToFirst] = useState(false);
+    const [shouldScrollToMonth, setShouldScrollToMonth] = useState<string | null>(null);
     // Check if a date is a holiday
     const isHoliday = (date: Date): boolean => {
         const year = date.getFullYear();
@@ -235,11 +237,22 @@ export function ContinuousCalendar() {
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const datesParam = urlParams.get('dates');
+        const monthParam = urlParams.get('month');
 
         if (datesParam) {
             const parsedIntervals = decodeIntervalsFromURL(datesParam);
             setIntervals(parsedIntervals);
+
+            // Priority: month parameter > intervals
+            if (!monthParam) {
+                setShouldScrollToFirst(true);
+            }
         }
+
+        if (monthParam) {
+            setShouldScrollToMonth(monthParam);
+        }
+
         setIsInitialized(true);
     }, []);
 
@@ -259,6 +272,112 @@ export function ContinuousCalendar() {
         const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
         window.history.replaceState({}, '', newUrl);
     }, [intervals, isInitialized]);
+
+    // Scroll to first interval after intervals are loaded from URL
+    useEffect(() => {
+        if (shouldScrollToFirst && intervals.length > 0) {
+            // Sort intervals by start date to find the first one
+            const sortedIntervals = [...intervals].sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+            const firstInterval = sortedIntervals[0];
+
+            scrollToDate(firstInterval.startDate);
+            setShouldScrollToFirst(false); // Reset flag
+        }
+    }, [shouldScrollToFirst, intervals]);
+
+    // Scroll to month when month parameter is set
+    useEffect(() => {
+        if (shouldScrollToMonth) {
+            const monthData = parseMonthFromString(shouldScrollToMonth);
+            if (monthData) {
+                scrollToMonth(monthData.year, monthData.month);
+                setShouldScrollToMonth(null);
+            }
+        }
+    }, [shouldScrollToMonth]);
+
+    // Helper function to scroll to a specific date
+    const scrollToDate = (date: Date) => {
+        const dateString = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+        console.log('Looking for element with data-date:', dateString);
+
+        const element = document.querySelector(`[data-date="${dateString}"]`);
+        console.log('Found element:', element);
+
+        if (element) {
+            const rect = element.getBoundingClientRect();
+            const elementTop = rect.top + window.pageYOffset;
+            const viewportHeight = window.innerHeight;
+            const targetPosition = elementTop - viewportHeight / 2 + rect.height / 2;
+
+            console.log('Scrolling to position:', targetPosition);
+
+            window.scrollTo({
+                top: Math.max(0, targetPosition),
+                behavior: 'smooth',
+            });
+        } else {
+            console.log('Element not found for date:', dateString);
+        }
+    };
+
+    // Helper function to scroll to a month
+    const scrollToMonth = (year: number, month: number) => {
+        // Find first day of the month
+        const firstDay = new Date(year, month, 1);
+        scrollToDate(firstDay);
+    };
+
+    // Format month for URL (YYMM)
+    const formatMonthToString = (year: number, month: number): string => {
+        const yearStr = year.toString().slice(-2);
+        const monthStr = (month + 1).toString().padStart(2, '0');
+        return `${yearStr}${monthStr}`;
+    };
+
+    // Parse month from URL string (YYMM)
+    const parseMonthFromString = (monthStr: string): { year: number; month: number } | null => {
+        if (monthStr.length !== 4) return null;
+
+        try {
+            const year = parseInt(`20${monthStr.slice(0, 2)}`);
+            const month = parseInt(monthStr.slice(2, 4)) - 1; // Month is 0-indexed
+            return { year, month };
+        } catch {
+            return null;
+        }
+    };
+
+    // Handle month click
+    const handleMonthClick = (year: number, monthName: string) => {
+        const monthIndex = [
+            'January',
+            'February',
+            'March',
+            'April',
+            'May',
+            'June',
+            'July',
+            'August',
+            'September',
+            'October',
+            'November',
+            'December',
+        ].indexOf(monthName);
+
+        if (monthIndex !== -1) {
+            const monthStr = formatMonthToString(year, monthIndex);
+
+            // Update URL
+            const urlParams = new URLSearchParams(window.location.search);
+            urlParams.set('month', monthStr);
+            const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
+            window.history.pushState({}, '', newUrl);
+
+            // Scroll to month
+            scrollToMonth(year, monthIndex);
+        }
+    };
 
     // Helper functions for interval selection
     const handleDateClick = (date: Date) => {
@@ -361,6 +480,7 @@ export function ContinuousCalendar() {
                                         <div
                                             key={`${day.year}-${day.month}-${day.day}`}
                                             className="relative h-16 w-16 flex justify-center align-center"
+                                            data-date={`${day.year}-${day.month}-${day.day}`}
                                         >
                                             {/* Day cell */}
                                             <div
@@ -400,7 +520,12 @@ export function ContinuousCalendar() {
                                 top: `${monthPos.weekIndex * 64 + 64 + 4}px`, // 64px per week row + header height + offset
                             }}
                         >
-                            <div className="text-sm font-medium text-gray-700">{monthPos.monthName}</div>
+                            <div
+                                className="text-sm font-medium text-gray-700 cursor-pointer hover:text-blue-600 transition-colors"
+                                onClick={() => handleMonthClick(monthPos.year, monthPos.monthName)}
+                            >
+                                {monthPos.monthName}
+                            </div>
                             <div className="text-xs text-gray-500">{monthPos.year}</div>
                         </div>
                     ))}
