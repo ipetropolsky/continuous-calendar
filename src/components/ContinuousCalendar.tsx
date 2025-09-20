@@ -174,18 +174,18 @@ export function ContinuousCalendar() {
         <div className="w-full max-w-7xl mx-auto p-8">
             <div className="mb-8 text-center">
                 <h1 className="text-3xl font-light mb-2">2025 – 2026</h1>
-                <p className="text-muted-foreground">Continuous Calendar</p>
+                <p className="text-gray-500">Continuous Calendar</p>
             </div>
 
-            <div className="flex gap-8">
+            <div className="flex gap-8 justify-center">
                 {/* Calendar section */}
-                <div className="flex-1">
+                <div className="w-[448px] flex-col">
                     {/* Week day headers */}
-                    <div className="grid grid-cols-7 gap-1 mb-4 sticky top-0 bg-background z-10 py-2">
+                    <div className="grid grid-cols-7 gap-1 mb-4 sticky top-0 bg-white z-10 pt-2">
                         {weekDayLabels.map((label) => (
                             <div
                                 key={label}
-                                className="h-8 flex items-center justify-center text-xs font-medium text-muted-foreground border-b border-border/50"
+                                className="w-16 h-8 flex items-center justify-center text-xs font-medium text-gray-500 border-b"
                             >
                                 {label}
                             </div>
@@ -193,7 +193,7 @@ export function ContinuousCalendar() {
                     </div>
 
                     {/* Calendar grid */}
-                    <div className="relative w-112">
+                    <div className="relative">
                         {weeks.map((week, weekIndex) => (
                             <div key={weekIndex} className="grid grid-cols-7 gap-1 relative">
                                 {week.map((day, dayIndex) => {
@@ -209,7 +209,7 @@ export function ContinuousCalendar() {
                                         <div key={`${day.year}-${day.month}-${day.day}`} className="relative">
                                             {/* Day cell */}
                                             <div
-                                                className="h-16 w-16 flex items-center justify-center hover:bg-accent/50 rounded-full transition-colors cursor-pointer"
+                                                className="h-16 w-16 flex items-center justify-center hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
                                                 style={dayStyle}
                                             >
                                                 {day.day}
@@ -223,17 +223,17 @@ export function ContinuousCalendar() {
                 </div>
 
                 {/* Month sidebar */}
-                <div className="w-48 flex-shrink-0 relative">
+                <div className="w-24 flex-shrink-0 relative">
                     {monthPositions.map((monthPos) => (
                         <div
                             key={`${monthPos.year}-${monthPos.monthName}`}
-                            className="absolute left-4"
+                            className="absolute left-0"
                             style={{
-                                top: `${monthPos.weekIndex * 64 + 64 + 16}px`, // 64px per week row + header height + offset
+                                top: `${monthPos.weekIndex * 64 + 64 + 8}px`, // 64px per week row + header height + offset
                             }}
                         >
-                            <div className="text-sm font-medium text-foreground/80">{monthPos.monthName}</div>
-                            <div className="text-xs text-muted-foreground">{monthPos.year}</div>
+                            <div className="text-sm font-medium text-gray-700">{monthPos.monthName}</div>
+                            <div className="text-xs text-gray-500">{monthPos.year}</div>
                         </div>
                     ))}
                 </div>
