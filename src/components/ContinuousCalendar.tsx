@@ -193,7 +193,7 @@ export function ContinuousCalendar() {
                     </div>
 
                     {/* Calendar grid */}
-                    <div className="relative">
+                    <div className="relative w-112">
                         {weeks.map((week, weekIndex) => (
                             <div key={weekIndex} className="grid grid-cols-7 gap-1 relative">
                                 {week.map((day, dayIndex) => {

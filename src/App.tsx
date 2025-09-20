@@ -1,4 +1,4 @@
-import { ContinuousCalendar } from './components/ContinuousCalendar';
+import { ContinuousCalendar } from '@/components/ContinuousCalendar';
 
 export default function App() {
     return (
