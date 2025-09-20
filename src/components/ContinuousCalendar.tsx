@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { X } from 'lucide-react';
 
 interface CalendarDay {
     date: Date;
@@ -436,92 +437,112 @@ export function ContinuousCalendar() {
     };
 
     return (
-        <div className="w-full max-w-7xl mx-auto p-8">
-            <div className="mb-8 text-center">
-                <h1 className="text-3xl font-light mb-2">2025 – 2026</h1>
+        <div className="w-full max-w-7xl mx-auto p-4 md:p-8">
+            <div className="mb-6 md:mb-8 text-center">
+                <h1 className="text-2xl md:text-3xl font-light mb-2">2025 – 2026</h1>
                 <p className="text-gray-500">Continuous Calendar</p>
             </div>
 
-            {/* Sticky week day headers - spans full width */}
+            {/* Sticky week day headers - responsive width */}
             <div className="sticky top-0 bg-white z-10 pt-2 mb-4">
                 <div className="flex gap-8 justify-center">
-                    <div className="w-[448px]">
+                    <div className="w-full max-w-[448px] md:w-[448px]">
                         <div className="grid grid-cols-7 gap-1">
                             {weekDayLabels.map((label) => (
                                 <div
                                     key={label}
-                                    className="w-16 h-8 flex items-center justify-center text-xs font-medium text-gray-500 border-b"
+                                    className="h-8 flex items-center justify-center text-xs font-medium text-gray-500 border-b"
                                 >
                                     {label}
                                 </div>
                             ))}
                         </div>
                     </div>
-                    <div className="w-24 flex-shrink-0">
-                        {/* Empty space for sidebar alignment */}
+                    <div className="hidden md:block w-24 flex-shrink-0">
+                        {/* Empty space for sidebar alignment on desktop */}
                     </div>
                 </div>
             </div>
 
             <div className="flex gap-8 justify-center">
                 {/* Calendar section */}
-                <div className="w-[448px] flex-col">
-
+                <div className="w-full max-w-[448px] md:w-[448px] flex-col">
                     {/* Calendar grid */}
                     <div className="relative">
-                        {weeks.map((week, weekIndex) => (
-                            <div key={weekIndex} className="grid grid-cols-7 gap-1 relative">
-                                {week.map((day, dayIndex) => {
-                                    if (!day) {
-                                        return <div key={dayIndex} className="h-16" />;
-                                    }
+                        {weeks.map((week, weekIndex) => {
+                            // Check if this week has the first day of a new month
+                            const firstDayOfMonth = week.find((day) => day && day.isNewMonth);
 
-                                    const dayClass = day.isWorkingDay ? 'text-gray-400' : 'text-black';
-
-                                    const dateStatus = getDateStatus(day.date);
-
-                                    // Determine background colors based on selection status
-                                    let bgClass = 'hover:bg-gray-100';
-                                    if (dateStatus.isSelected || dateStatus.isInInterval) {
-                                        bgClass = 'bg-slate-500 hover:bg-slate-600 text-zinc-50';
-                                    }
-
-                                    return (
-                                        <div
-                                            key={`${day.year}-${day.month}-${day.day}`}
-                                            className="relative h-16 w-16 flex justify-center align-center"
-                                            data-date={`${day.year}-${day.month}-${day.day}`}
-                                        >
-                                            {/* Day cell */}
+                            return (
+                                <div key={weekIndex} className="relative">
+                                    {/* Month label for mobile - above first day of month */}
+                                    {firstDayOfMonth && (
+                                        <div className="md:hidden mb-2">
                                             <div
-                                                className={`h-14 w-14 flex items-center justify-center text-3xl ${bgClass} ${dayClass} rounded-full transition-colors cursor-pointer`}
-                                                onClick={() => handleDateClick(day.date)}
+                                                className="text-lg font-medium text-gray-700 cursor-pointer hover:text-blue-600 transition-colors inline-block"
+                                                onClick={() =>
+                                                    handleMonthClick(firstDayOfMonth.year, firstDayOfMonth.monthName)
+                                                }
                                             >
-                                                {day.day}
+                                                {firstDayOfMonth.monthName} {firstDayOfMonth.year}
                                             </div>
-
-                                            {/* Delete button for interval end dates */}
-                                            {dateStatus.isIntervalEnd && (
-                                                <button
-                                                    className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs hover:bg-red-600 flex items-center justify-center cursor-pointer"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        removeInterval(dateStatus.intervalId!);
-                                                    }}
-                                                >
-                                                    ×
-                                                </button>
-                                            )}
                                         </div>
-                                    );
-                                })}
-                            </div>
-                        ))}
+                                    )}
+
+                                    <div className="grid grid-cols-7 gap-1 mb-2">
+                                        {week.map((day, dayIndex) => {
+                                            if (!day) {
+                                                return <div key={dayIndex} className="h-12 md:h-16" />;
+                                            }
+
+                                            const dayClass = day.isWorkingDay ? 'text-gray-400' : 'text-black';
+
+                                            const dateStatus = getDateStatus(day.date);
+
+                                            // Determine background colors based on selection status
+                                            let bgClass = 'hover:bg-gray-100';
+                                            if (dateStatus.isSelected || dateStatus.isInInterval) {
+                                                bgClass = 'bg-slate-500 hover:bg-slate-600 text-zinc-50';
+                                            }
+
+                                            return (
+                                                <div
+                                                    key={`${day.year}-${day.month}-${day.day}`}
+                                                    className="relative h-12 md:h-16 w-full flex justify-center align-center"
+                                                    data-date={`${day.year}-${day.month}-${day.day}`}
+                                                >
+                                                    {/* Day cell */}
+                                                    <div
+                                                        className={`h-10 w-10 md:h-14 md:w-14 flex items-center justify-center text-lg md:text-3xl ${bgClass} ${dayClass} rounded-full transition-colors cursor-pointer`}
+                                                        onClick={() => handleDateClick(day.date)}
+                                                    >
+                                                        {day.day}
+                                                    </div>
+
+                                                    {/* Delete button for interval end dates */}
+                                                    {dateStatus.isIntervalEnd && (
+                                                        <button
+                                                            className="absolute -top-1 -right-1 w-4 h-4 md:w-5 md:h-5 bg-red-500 text-white rounded-full hover:bg-red-600 flex items-center justify-center cursor-pointer"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                removeInterval(dateStatus.intervalId!);
+                                                            }}
+                                                        >
+                                                            <X className="w-2.5 h-2.5 md:w-3 md:h-3" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
 
-                {/* Month sidebar */}
-                <div className="w-24 flex-shrink-0 relative">
+                {/* Month sidebar - desktop only */}
+                <div className="hidden md:block w-24 flex-shrink-0 relative">
                     {monthPositions.map((monthPos) => (
                         <div
                             key={`${monthPos.year}-${monthPos.monthName}`}
