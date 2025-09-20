@@ -442,20 +442,30 @@ export function ContinuousCalendar() {
                 <p className="text-gray-500">Continuous Calendar</p>
             </div>
 
+            {/* Sticky week day headers - spans full width */}
+            <div className="sticky top-0 bg-white z-10 pt-2 mb-4">
+                <div className="flex gap-8 justify-center">
+                    <div className="w-[448px]">
+                        <div className="grid grid-cols-7 gap-1">
+                            {weekDayLabels.map((label) => (
+                                <div
+                                    key={label}
+                                    className="w-16 h-8 flex items-center justify-center text-xs font-medium text-gray-500 border-b"
+                                >
+                                    {label}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="w-24 flex-shrink-0">
+                        {/* Empty space for sidebar alignment */}
+                    </div>
+                </div>
+            </div>
+
             <div className="flex gap-8 justify-center">
                 {/* Calendar section */}
                 <div className="w-[448px] flex-col">
-                    {/* Week day headers */}
-                    <div className="grid grid-cols-7 gap-1 mb-4 sticky top-0 bg-white z-10 pt-2">
-                        {weekDayLabels.map((label) => (
-                            <div
-                                key={label}
-                                className="w-16 h-8 flex items-center justify-center text-xs font-medium text-gray-500 border-b"
-                            >
-                                {label}
-                            </div>
-                        ))}
-                    </div>
 
                     {/* Calendar grid */}
                     <div className="relative">
