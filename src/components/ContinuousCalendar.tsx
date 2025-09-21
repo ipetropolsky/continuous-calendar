@@ -27,6 +27,7 @@ export function ContinuousCalendar() {
     const [shouldScrollToFirst, setShouldScrollToFirst] = useState(false);
     const [shouldScrollToMonth, setShouldScrollToMonth] = useState<string | null>(null);
     const [showSettings, setShowSettings] = useState(false);
+    const [settingsVisible, setSettingsVisible] = useState(false);
     const [showVacations, setShowVacations] = useState(false);
     // Holiday dates in YYYY-MM-DD format
     const holidayDates = [
@@ -500,54 +501,87 @@ export function ContinuousCalendar() {
 
     return (
         <div className="w-full max-w-7xl mx-auto p-4 md:p-8">
-            <div className="mb-6 md:mb-8 text-center relative">
-                <h1 className="text-2xl md:text-3xl font-light mb-2">2025 – 2026</h1>
-                <p className="text-gray-500">Continuous Calendar</p>
-
-                {/* Settings button */}
-                <button
-                    className="absolute top-0 right-0 p-2 text-gray-500 hover:text-gray-700 transition-colors"
-                    onClick={() => setShowSettings(true)}
-                >
-                    <Settings className="w-5 h-5" />
-                </button>
+            <div className="flex gap-8 justify-center">
+                <div className="w-full max-w-[448px] md:w-[448px]">
+                    <div className="flex-1 flex flex-col md:items-center">
+                        <h1 className="text-2xl md:text-3xl font-light md:mb-2">2025 – 2026</h1>
+                        <p className="text-gray-500">Continuous Calendar</p>
+                    </div>
+                </div>
+                <div className="md:w-24 flex-shrink-0">
+                    <button
+                        className="p-2 text-gray-500 hover:text-gray-700 transition-colors rounded-full hover:bg-gray-100"
+                        onClick={() => {
+                            setShowSettings(true);
+                            setTimeout(() => setSettingsVisible(true), 10);
+                        }}
+                    >
+                        <Settings className="w-5 h-5" />
+                    </button>
+                </div>
             </div>
 
             {/* Settings Modal */}
             {showSettings && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg p-6 w-96 max-w-90vw">
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-xl font-semibold">Settings</h2>
+                <div
+                    className={`fixed inset-0 flex items-center justify-center z-50 transition-all duration-200 ease-in-out ${
+                        settingsVisible ? 'bg-black/75' : 'bg-black/0'
+                    }`}
+                    onClick={() => {
+                        setSettingsVisible(false);
+                        setTimeout(() => setShowSettings(false), 200);
+                    }}
+                >
+                    <div
+                        className={`bg-white rounded-xl shadow-2xl p-8 w-full max-w-md mx-4 transform transition-all duration-200 ease-in-out ${
+                            settingsVisible ? 'scale-100 opacity-100' : 'scale-95 opacity-0'
+                        }`}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-semibold text-gray-800">Settings</h2>
                             <button
-                                className="text-gray-500 hover:text-gray-700"
-                                onClick={() => setShowSettings(false)}
+                                className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition-colors"
+                                onClick={() => {
+                                    setSettingsVisible(false);
+                                    setTimeout(() => setShowSettings(false), 200);
+                                }}
                             >
-                                <X className="w-5 h-5" />
+                                <X className="w-6 h-6" />
                             </button>
                         </div>
 
-                        <div className="space-y-4">
-                            <label className="flex items-center space-x-3">
-                                <input
-                                    type="checkbox"
-                                    checked={showVacations}
-                                    onChange={(e) => {
-                                        setShowVacations(e.target.checked);
-                                        // Update URL parameter
-                                        const urlParams = new URLSearchParams(window.location.search);
-                                        if (e.target.checked) {
-                                            urlParams.set('vc', '');
-                                        } else {
-                                            urlParams.delete('vc');
-                                        }
-                                        const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
-                                        window.history.replaceState({}, '', newUrl);
-                                    }}
-                                    className="w-4 h-4"
-                                />
-                                <span className="text-gray-700">Show vacations</span>
-                            </label>
+                        <div className="space-y-6">
+                            <div className="border-b border-gray-100 pb-4">
+                                <h3 className="text-lg font-medium text-gray-700 mb-3">Display Options</h3>
+                                <label className="flex items-center space-x-4 cursor-pointer group">
+                                    <input
+                                        type="checkbox"
+                                        checked={showVacations}
+                                        onChange={(e) => {
+                                            setShowVacations(e.target.checked);
+                                            // Update URL parameter
+                                            const urlParams = new URLSearchParams(window.location.search);
+                                            if (e.target.checked) {
+                                                urlParams.set('vc', '');
+                                            } else {
+                                                urlParams.delete('vc');
+                                            }
+                                            const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
+                                            window.history.replaceState({}, '', newUrl);
+                                        }}
+                                        className="w-5 h-5 text-blue-600 border-2 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                                    />
+                                    <div className="flex flex-col">
+                                        <span className="text-gray-700 font-medium group-hover:text-gray-900 transition-colors">
+                                            Show vacations
+                                        </span>
+                                        <span className="text-sm text-gray-500">
+                                            Display school vacation periods in orange
+                                        </span>
+                                    </div>
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </div>
