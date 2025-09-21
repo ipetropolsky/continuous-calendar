@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, Settings } from 'lucide-react';
 
 interface CalendarDay {
     date: Date;
@@ -10,6 +10,8 @@ interface CalendarDay {
     monthName: string;
     isWorkingDay: boolean;
     isHoliday: boolean;
+    isVacation: boolean;
+    isWeekend: boolean;
 }
 
 interface DateInterval {
@@ -24,49 +26,102 @@ export function ContinuousCalendar() {
     const [isInitialized, setIsInitialized] = useState(false);
     const [shouldScrollToFirst, setShouldScrollToFirst] = useState(false);
     const [shouldScrollToMonth, setShouldScrollToMonth] = useState<string | null>(null);
+    const [showSettings, setShowSettings] = useState(false);
+    const [showVacations, setShowVacations] = useState(false);
+    // Holiday dates in YYYY-MM-DD format
+    const holidayDates = [
+        // 2025 holidays
+        '2025-01-01',
+        '2025-01-02',
+        '2025-01-03',
+        '2025-01-04',
+        '2025-01-05',
+        '2025-01-06',
+        '2025-01-07',
+        '2025-01-08',
+        '2025-02-23',
+        '2025-03-08',
+        '2025-05-01',
+        '2025-05-02',
+        '2025-05-08',
+        '2025-05-09',
+        '2025-06-12',
+        '2025-06-13',
+        '2025-11-03',
+        '2025-11-04',
+        // 2026 holidays
+        '2026-01-01',
+        '2026-01-02',
+        '2026-01-03',
+        '2026-01-04',
+        '2026-01-05',
+        '2026-01-06',
+        '2026-01-07',
+        '2026-01-08',
+        '2026-01-09',
+        '2026-02-23',
+        '2026-03-09',
+        '2026-05-01',
+        '2026-05-11',
+        '2026-06-12',
+        '2026-11-04',
+    ];
+
+    // Vacation dates in YYYY-MM-DD format
+    const vacationDates = [
+        // 2025-10-25 to 2025-11-04
+        '2025-10-25',
+        '2025-10-26',
+        '2025-10-27',
+        '2025-10-28',
+        '2025-10-29',
+        '2025-10-30',
+        '2025-10-31',
+        '2025-11-01',
+        '2025-11-02',
+        '2025-11-03',
+        '2025-11-04',
+        // 2026-02-21 to 2026-03-01
+        '2026-02-21',
+        '2026-02-22',
+        '2026-02-23',
+        '2026-02-24',
+        '2026-02-25',
+        '2026-02-26',
+        '2026-02-27',
+        '2026-02-28',
+        '2026-03-01',
+        // 2026-03-28 to 2026-04-05
+        '2026-03-28',
+        '2026-03-29',
+        '2026-03-30',
+        '2026-03-31',
+        '2026-04-01',
+        '2026-04-02',
+        '2026-04-03',
+        '2026-04-04',
+        '2026-04-05',
+    ];
+
+    // Format date to YYYY-MM-DD string
+    const formatDateString = (date: Date): string => {
+        const year = date.getFullYear();
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const day = date.getDate().toString().padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
     // Check if a date is a holiday
     const isHoliday = (date: Date): boolean => {
-        const year = date.getFullYear();
-        const month = date.getMonth() + 1; // JavaScript months are 0-indexed
-        const day = date.getDate();
+        const dateString = formatDateString(date);
+        return holidayDates.includes(dateString);
+    };
 
-        if (year === 2025) {
-            // 1 jan - 8 jan
-            if (month === 1 && day >= 1 && day <= 8) return true;
-            // 23 feb
-            if (month === 2 && day === 23) return true;
-            // 8 mar
-            if (month === 3 && day === 8) return true;
-            // 1 may
-            if (month === 5 && day === 1) return true;
-            // 9 may
-            if (month === 5 && day === 9) return true;
-            // 12 june
-            if (month === 6 && day === 12) return true;
-            // 25 oct - 4 nov
-            if ((month === 10 && day >= 25) || (month === 11 && day <= 4)) return true;
-        }
-
-        if (year === 2026) {
-            // 1 jan - 9 jan
-            if (month === 1 && day >= 1 && day <= 9) return true;
-            // 21 feb - 1 mar
-            if ((month === 2 && day >= 21) || (month === 3 && day === 1)) return true;
-            // 9 mar
-            if (month === 3 && day === 9) return true;
-            // 28 mar - 5 apr
-            if ((month === 3 && day >= 28) || (month === 4 && day <= 5)) return true;
-            // 1 may
-            if (month === 5 && day === 1) return true;
-            // 11 may
-            if (month === 5 && day === 11) return true;
-            // 12 jun
-            if (month === 6 && day === 12) return true;
-            // 4 nov
-            if (month === 11 && day === 4) return true;
-        }
-
-        return false;
+    // Check if a date is a vacation (only if showVacations is enabled)
+    const isVacation = (date: Date): boolean => {
+        if (!showVacations) return false;
+        const dateString = formatDateString(date);
+        return vacationDates.includes(dateString) && !holidayDates.includes(dateString);
     };
 
     // Check if a date is a working day (Monday-Friday and not a holiday)
@@ -116,6 +171,8 @@ export function ContinuousCalendar() {
                 monthName: monthNames[month],
                 isWorkingDay: isWorkingDay(dateObj),
                 isHoliday: isHoliday(dateObj),
+                isVacation: isVacation(dateObj),
+                isWeekend: !isWorkingDay(dateObj),
             });
 
             lastMonth = month;
@@ -252,6 +309,11 @@ export function ContinuousCalendar() {
 
         if (monthParam) {
             setShouldScrollToMonth(monthParam);
+        }
+
+        const vacationParam = urlParams.has('vc');
+        if (vacationParam) {
+            setShowVacations(true);
         }
 
         setIsInitialized(true);
@@ -438,10 +500,58 @@ export function ContinuousCalendar() {
 
     return (
         <div className="w-full max-w-7xl mx-auto p-4 md:p-8">
-            <div className="mb-6 md:mb-8 text-center">
+            <div className="mb-6 md:mb-8 text-center relative">
                 <h1 className="text-2xl md:text-3xl font-light mb-2">2025 – 2026</h1>
                 <p className="text-gray-500">Continuous Calendar</p>
+
+                {/* Settings button */}
+                <button
+                    className="absolute top-0 right-0 p-2 text-gray-500 hover:text-gray-700 transition-colors"
+                    onClick={() => setShowSettings(true)}
+                >
+                    <Settings className="w-5 h-5" />
+                </button>
             </div>
+
+            {/* Settings Modal */}
+            {showSettings && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-96 max-w-90vw">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-semibold">Settings</h2>
+                            <button
+                                className="text-gray-500 hover:text-gray-700"
+                                onClick={() => setShowSettings(false)}
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <label className="flex items-center space-x-3">
+                                <input
+                                    type="checkbox"
+                                    checked={showVacations}
+                                    onChange={(e) => {
+                                        setShowVacations(e.target.checked);
+                                        // Update URL parameter
+                                        const urlParams = new URLSearchParams(window.location.search);
+                                        if (e.target.checked) {
+                                            urlParams.set('vc', '');
+                                        } else {
+                                            urlParams.delete('vc');
+                                        }
+                                        const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
+                                        window.history.replaceState({}, '', newUrl);
+                                    }}
+                                    className="w-4 h-4"
+                                />
+                                <span className="text-gray-700">Show vacations</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Sticky week day headers - responsive width */}
             <div className="sticky top-0 bg-white z-10 pt-2 mb-4">
@@ -495,14 +605,34 @@ export function ContinuousCalendar() {
                                                 return <div key={dayIndex} className="h-12 md:h-16" />;
                                             }
 
-                                            const dayClass = day.isWorkingDay ? 'text-gray-400' : 'text-black';
-
                                             const dateStatus = getDateStatus(day.date);
 
-                                            // Determine background colors based on selection status
-                                            let bgClass = 'hover:bg-gray-100';
+                                            // Determine text color based on day type
+                                            let dayClass = 'text-slate-800';
                                             if (dateStatus.isSelected || dateStatus.isInInterval) {
-                                                bgClass = 'bg-slate-500 hover:bg-slate-600 text-zinc-50';
+                                                dayClass = 'text-zinc-50';
+                                            } else if (day.isVacation) {
+                                                dayClass = 'text-orange-600 font-medium';
+                                            } else if (day.isHoliday || day.isWeekend) {
+                                                dayClass = 'text-rose-600 font-medium';
+                                            }
+
+                                            // Determine background colors based on selection status
+                                            let bgClass = 'hover:bg-zinc-100';
+                                            if (dateStatus.isSelected || dateStatus.isInInterval) {
+                                                if (day.isWorkingDay && !day.isVacation) {
+                                                    bgClass = 'bg-slate-500 hover:bg-slate-600';
+                                                } else if (day.isVacation) {
+                                                    bgClass = 'bg-red-600 hover:bg-red-700';
+                                                } else if (day.isHoliday || day.isWeekend) {
+                                                    bgClass = 'bg-red-600 hover:bg-orange-700';
+                                                } else {
+                                                    bgClass = 'bg-slate-500 hover:bg-slate-600';
+                                                }
+                                            } else if (day.isVacation) {
+                                                bgClass = 'bg-orange-50 hover:bg-orange-100';
+                                            } else if (day.isHoliday || day.isWeekend) {
+                                                bgClass = 'bg-rose-50 hover:bg-rose-100';
                                             }
 
                                             return (
