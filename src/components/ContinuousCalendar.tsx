@@ -501,14 +501,25 @@ export function ContinuousCalendar() {
 
     return (
         <div className="w-full max-w-7xl mx-auto p-4 md:p-8">
-            <div className="flex gap-8 justify-center">
-                <div className="w-full max-w-[448px] md:w-[448px]">
+            <div className="flex gap-8 justify-center mb-2">
+                <div className="w-full max-w-[448px] md:w-[448px] flex justify-between">
                     <div className="flex-1 flex flex-col md:items-center">
-                        <h1 className="text-2xl md:text-3xl font-light md:mb-2">2025 – 2026</h1>
-                        <p className="text-gray-500">Continuous Calendar</p>
+                        <h1 className="text-2xl md:text-3xl font-bold font-serif md:mb-1">Continuous Calendar</h1>
+                        <p className="text-gray-500 font-serif">2025 — 2026</p>
+                    </div>
+                    <div className="md:hidden flex-shrink-0">
+                        <button
+                            className="p-2 text-gray-500 hover:text-gray-700 transition-colors rounded-full hover:bg-gray-100"
+                            onClick={() => {
+                                setShowSettings(true);
+                                setTimeout(() => setSettingsVisible(true), 10);
+                            }}
+                        >
+                            <Settings className="w-5 h-5" />
+                        </button>
                     </div>
                 </div>
-                <div className="md:w-24 flex-shrink-0">
+                <div className="hidden md:block md:w-24 flex-shrink-0">
                     <button
                         className="p-2 text-gray-500 hover:text-gray-700 transition-colors rounded-full hover:bg-gray-100"
                         onClick={() => {
@@ -554,7 +565,7 @@ export function ContinuousCalendar() {
                         <div className="space-y-6">
                             <div className="border-b border-gray-100 pb-4">
                                 <h3 className="text-lg font-medium text-gray-700 mb-3">Display Options</h3>
-                                <label className="flex items-center space-x-4 cursor-pointer group">
+                                <label className="flex items-start space-x-4 cursor-pointer group">
                                     <input
                                         type="checkbox"
                                         checked={showVacations}
@@ -563,14 +574,14 @@ export function ContinuousCalendar() {
                                             // Update URL parameter
                                             const urlParams = new URLSearchParams(window.location.search);
                                             if (e.target.checked) {
-                                                urlParams.set('vc', '');
+                                                urlParams.set('vc', 'true');
                                             } else {
                                                 urlParams.delete('vc');
                                             }
                                             const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
                                             window.history.replaceState({}, '', newUrl);
                                         }}
-                                        className="w-5 h-5 text-blue-600 border-2 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                                        className="w-5 h-5 mt-1 text-blue-600 border-2 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
                                     />
                                     <div className="flex flex-col">
                                         <span className="text-gray-700 font-medium group-hover:text-gray-900 transition-colors">
@@ -588,14 +599,14 @@ export function ContinuousCalendar() {
             )}
 
             {/* Sticky week day headers - responsive width */}
-            <div className="sticky top-0 bg-white z-10 pt-2 mb-4">
+            <div className="sticky top-0 bg-white z-20 pt-2 mb-4">
                 <div className="flex gap-8 justify-center">
                     <div className="w-full max-w-[448px] md:w-[448px]">
                         <div className="grid grid-cols-7 gap-1">
                             {weekDayLabels.map((label) => (
                                 <div
                                     key={label}
-                                    className="h-8 flex items-center justify-center text-xs font-medium text-gray-500 border-b"
+                                    className="h-8 flex items-center justify-center text-xs font-medium font-serif text-gray-500 border-b"
                                 >
                                     {label}
                                 </div>
@@ -610,25 +621,26 @@ export function ContinuousCalendar() {
 
             <div className="flex gap-8 justify-center">
                 {/* Calendar section */}
-                <div className="w-full max-w-[448px] md:w-[448px] flex-col">
+                <div className="w-full px-4 max-w-[448px] md:w-[448px] flex-col">
                     {/* Calendar grid */}
-                    <div className="relative">
+                    <div>
                         {weeks.map((week, weekIndex) => {
                             // Check if this week has the first day of a new month
                             const firstDayOfMonth = week.find((day) => day && day.isNewMonth);
 
                             return (
-                                <div key={weekIndex} className="relative">
+                                <div key={weekIndex} className="relative z-10">
                                     {/* Month label for mobile - above first day of month */}
                                     {firstDayOfMonth && (
-                                        <div className="md:hidden mb-2">
-                                            <div
-                                                className="text-lg font-medium text-gray-700 cursor-pointer hover:text-blue-600 transition-colors inline-block"
-                                                onClick={() =>
-                                                    handleMonthClick(firstDayOfMonth.year, firstDayOfMonth.monthName)
-                                                }
-                                            >
-                                                {firstDayOfMonth.monthName} {firstDayOfMonth.year}
+                                        <div
+                                            className="md:hidden"
+                                            onClick={() =>
+                                                handleMonthClick(firstDayOfMonth.year, firstDayOfMonth.monthName)
+                                            }
+                                        >
+                                            <div className="absolute p-1 z-20 right-full -translate-x-1 bottom-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-500 hover:text-blue-500 transition-colors inline-block cursor-pointer">
+                                                {firstDayOfMonth.monthName}{' '}
+                                                <span className="text-gray-400">{firstDayOfMonth.year}</span>
                                             </div>
                                         </div>
                                     )}
@@ -646,16 +658,16 @@ export function ContinuousCalendar() {
                                             if (dateStatus.isSelected || dateStatus.isInInterval) {
                                                 dayClass = 'text-zinc-50';
                                             } else if (day.isVacation) {
-                                                dayClass = 'text-orange-600 font-medium';
+                                                dayClass = 'text-orange-600';
                                             } else if (day.isHoliday || day.isWeekend) {
-                                                dayClass = 'text-rose-600 font-medium';
+                                                dayClass = 'text-rose-600';
                                             }
 
                                             // Determine background colors based on selection status
-                                            let bgClass = 'hover:bg-zinc-100';
+                                            let bgClass = 'bg-zinc-50 hover:bg-zinc-100';
                                             if (dateStatus.isSelected || dateStatus.isInInterval) {
                                                 if (day.isWorkingDay && !day.isVacation) {
-                                                    bgClass = 'bg-slate-500 hover:bg-slate-600';
+                                                    bgClass = 'bg-slate-600 hover:bg-slate-700';
                                                 } else if (day.isVacation) {
                                                     bgClass = 'bg-red-600 hover:bg-red-700';
                                                 } else if (day.isHoliday || day.isWeekend) {
@@ -672,12 +684,12 @@ export function ContinuousCalendar() {
                                             return (
                                                 <div
                                                     key={`${day.year}-${day.month}-${day.day}`}
-                                                    className="relative h-12 w-full md:h-16 md:w-16 flex justify-center align-center items-center"
+                                                    className="relative z-10 h-14 w-full md:h-16 md:w-16 flex justify-center align-center items-center"
                                                     data-date={`${day.year}-${day.month}-${day.day}`}
                                                 >
                                                     {/* Day cell */}
                                                     <div
-                                                        className={`h-10 w-10 md:h-14 md:w-14 flex items-center justify-center text-lg md:text-3xl ${bgClass} ${dayClass} rounded-full transition-colors cursor-pointer`}
+                                                        className={`h-12 w-12 md:h-14 md:w-14 flex items-center justify-center font-serif text-2xl md:text-3xl ${bgClass} ${dayClass} rounded-full transition-colors cursor-pointer`}
                                                         onClick={() => handleDateClick(day.date)}
                                                     >
                                                         {day.day}
@@ -712,15 +724,13 @@ export function ContinuousCalendar() {
                             key={`${monthPos.year}-${monthPos.monthName}`}
                             data-month={`${monthPos.year}-${monthPos.monthName}`}
                             data-week={`${monthPos.weekIndex}`}
-                            className="absolute left-0 h-16 flex flex-col items-start justify-center"
+                            className="absolute left-0 h-16 flex flex-col items-start justify-center font-serif cursor-pointer"
                             style={{
                                 top: `${monthPos.weekIndex * 64}px`, // 64px (md:h-16) + 2px (mb-2) per week row + offset
                             }}
+                            onClick={() => handleMonthClick(monthPos.year, monthPos.monthName)}
                         >
-                            <div
-                                className="text-sm font-medium text-gray-700 cursor-pointer hover:text-blue-600 transition-colors"
-                                onClick={() => handleMonthClick(monthPos.year, monthPos.monthName)}
-                            >
+                            <div className="text-sm font-medium text-gray-700 hover:text-blue-600 transition-colors">
                                 {monthPos.monthName}
                             </div>
                             <div className="text-xs text-gray-500">{monthPos.year}</div>
