@@ -638,9 +638,10 @@ export function ContinuousCalendar() {
                                                 handleMonthClick(firstDayOfMonth.year, firstDayOfMonth.monthName)
                                             }
                                         >
-                                            <div className="absolute p-1 z-20 right-full -translate-x-1 translate-y-1 bottom-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-500 hover:text-blue-500 transition-colors inline-block cursor-pointer">
-                                                {firstDayOfMonth.monthName}{' '}
-                                                <span className="text-gray-400">{firstDayOfMonth.year}</span>
+                                            <div className="absolute p-1 z-20 right-full -translate-x-1 translate-y-1 bottom-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-700 hover:text-blue-500 transition-colors inline-block cursor-pointer">
+                                                {firstDayOfMonth.monthName}
+                                                {'\u00a0'}
+                                                <span className="text-gray-500">{firstDayOfMonth.year}</span>
                                             </div>
                                         </div>
                                     )}
