@@ -500,9 +500,9 @@ export function ContinuousCalendar() {
     };
 
     return (
-        <div className="w-full max-w-7xl mx-auto p-4 md:p-8">
-            <div className="flex gap-8 justify-center mb-2">
-                <div className="w-full max-w-[448px] md:w-[448px] flex justify-between">
+        <div className="w-full max-w-7xl mx-auto py-8 md:p-8">
+            <div className="flex gap-8 justify-center px-8 mb-2">
+                <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] flex justify-between">
                     <div className="flex-1 flex flex-col md:items-center">
                         <h1 className="text-2xl md:text-3xl font-bold font-serif md:mb-1">Continuous Calendar</h1>
                         <p className="text-gray-500 font-serif">2025 — 2026</p>
@@ -599,9 +599,9 @@ export function ContinuousCalendar() {
             )}
 
             {/* Sticky week day headers - responsive width */}
-            <div className="sticky top-0 bg-white z-20 pt-2 mb-4">
+            <div className="sticky top-0 bg-white z-20 px-8 pt-2 mb-4">
                 <div className="flex gap-8 justify-center">
-                    <div className="w-full max-w-[448px] md:w-[448px]">
+                    <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px]">
                         <div className="grid grid-cols-7 gap-1">
                             {weekDayLabels.map((label) => (
                                 <div
@@ -619,9 +619,9 @@ export function ContinuousCalendar() {
                 </div>
             </div>
 
-            <div className="flex gap-8 justify-center">
+            <div className="flex gap-8 px-8 justify-center">
                 {/* Calendar section */}
-                <div className="w-full px-4 max-w-[448px] md:w-[448px] flex-col">
+                <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] flex-col">
                     {/* Calendar grid */}
                     <div>
                         {weeks.map((week, weekIndex) => {
@@ -685,12 +685,12 @@ export function ContinuousCalendar() {
                                             return (
                                                 <div
                                                     key={`${day.year}-${day.month}-${day.day}`}
-                                                    className="relative z-10 h-14 w-full md:h-16 md:w-16 flex justify-center align-center items-center"
+                                                    className="relative z-10 h-12 xs:h-13 sm:h-15 md:h-16 md:w-16 flex justify-center align-center items-center"
                                                     data-date={`${day.year}-${day.month}-${day.day}`}
                                                 >
                                                     {/* Day cell */}
                                                     <div
-                                                        className={`h-12 w-12 md:h-14 md:w-14 flex items-center justify-center font-serif text-2xl md:text-3xl ${bgClass} ${dayClass} rounded-full transition-colors cursor-pointer`}
+                                                        className={`h-10 w-10 xs:h-12 xs:w-12 sm:h-13 sm:w-13 md:h-14 md:w-14 flex items-center justify-center font-serif text-xl xs:text-2xl md:text-3xl ${bgClass} ${dayClass} rounded-full transition-colors cursor-pointer`}
                                                         onClick={() => handleDateClick(day.date)}
                                                     >
                                                         {day.day}
