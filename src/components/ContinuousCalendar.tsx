@@ -148,10 +148,10 @@ export function ContinuousCalendar() {
         return isWeekday && !isHoliday(date);
     };
 
-    // Generate all days from 2025-2026
+    // Generate all days
     const generateCalendarData = (): CalendarDay[] => {
-        const startDate = new Date(2025, 0, 1); // Jan 1, 2025
-        const endDate = new Date(2027, 11, 31); // Dec 31, 2026
+        const startDate = new Date(2025, 0, 1);
+        const endDate = new Date(2027, 11, 31);
         const days: CalendarDay[] = [];
 
         const monthNames = [
@@ -549,7 +549,7 @@ export function ContinuousCalendar() {
                 <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] flex justify-between">
                     <div className="flex-1 flex flex-col md:items-center">
                         <h1 className="text-2xl md:text-3xl font-bold font-serif md:mb-1">Continuous Calendar</h1>
-                        <p className="text-gray-500 font-serif">2025 — 2026</p>
+                        <p className="text-gray-500 font-serif">2026 — 2027</p>
                     </div>
                     <div className="md:hidden flex items-center">
                         <button
