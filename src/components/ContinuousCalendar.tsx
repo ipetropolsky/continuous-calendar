@@ -673,7 +673,7 @@ export function ContinuousCalendar() {
                         {hiddenWeeksCount > 0 && !showPastDates && (
                             <button
                                 onClick={() => setShowPastDates(true)}
-                                className="md:hidden absolute left-0 top-8 -translate-x-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-700 hover:text-blue-500 transition-colors bg-sky-50 hover:bg-sky-100 rounded p-1 z-20"
+                                className="md:hidden absolute -left-1 -top-22 -translate-x-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-700 hover:text-blue-500 transition-colors bg-sky-50 hover:bg-sky-100 rounded p-1 z-20"
                             >
                                 Past →
                             </button>
@@ -786,7 +786,7 @@ export function ContinuousCalendar() {
                     {hiddenWeeksCount > 0 && !showPastDates && (
                         <button
                             onClick={() => setShowPastDates(true)}
-                            className="absolute left-2 -top-10 inline-flex items-center justify-center px-3 py-1.5 bg-sky-50 text-gray-700 rounded hover:bg-sky-100 hover:text-blue-600 transition-colors text-sm font-medium font-serif z-40 cursor-pointer"
+                            className="absolute left-0 -top-12 inline-flex items-center justify-center -ml-3 pl-3 pr-4 py-1.5 bg-sky-50 text-gray-700 rounded hover:bg-sky-100 hover:text-blue-600 transition-colors text-sm font-medium font-serif z-40 cursor-pointer"
                         >
                             ↑ Past
                         </button>
