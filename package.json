@@ -26,6 +26,7 @@
         "dev": "vite",
         "build": "vite build",
         "ts-check": "tsc --noEmit",
-        "deploy": "gh-pages -d build"
+        "deploy": "gh-pages -d build",
+        "deps:latest": "node tools/get-latest-deps.js"
     }
 }
