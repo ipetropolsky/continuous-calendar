@@ -30,13 +30,13 @@ interface DateStatus {
 export function ContinuousCalendar() {
     const [intervals, setIntervals] = useState<DateInterval[]>([]);
     const [selectedStart, setSelectedStart] = useState<Date | null>(null);
-    const [isInitialized, setIsInitialized] = useState(false);
     const [shouldScrollToFirst, setShouldScrollToFirst] = useState(false);
     const [shouldScrollToMonth, setShouldScrollToMonth] = useState<string | null>(null);
     const [showSettings, setShowSettings] = useState(false);
     const [settingsVisible, setSettingsVisible] = useState(false);
     const [showVacations, setShowVacations] = useState(false);
     const [showPastDates, setShowPastDates] = useState(false);
+    const [shouldScrollToToday, setShouldScrollToToday] = useState(false);
     // Holiday dates in YYYY-MM-DD format
     const holidayDates = [
         // 2025 holidays
@@ -125,6 +125,16 @@ export function ContinuousCalendar() {
     // Check if date is before firstVisibleDate
     const isDateBeforeFirstVisible = (date: Date): boolean => {
         return date < firstVisibleDate;
+    };
+
+    // Check if date is today
+    const isToday = (date: Date): boolean => {
+        const today = new Date();
+        return (
+            date.getFullYear() === today.getFullYear() &&
+            date.getMonth() === today.getMonth() &&
+            date.getDate() === today.getDate()
+        );
     };
 
     // Check if a date is a holiday
@@ -359,10 +369,14 @@ export function ContinuousCalendar() {
         }
 
         setShowPastDates(shouldShowPastDatesInitially);
-        setIsInitialized(true);
+
+        // Set scroll to today if no intervals or month param
+        if (parsedIntervals.length === 0 && !monthParam) {
+            setShouldScrollToToday(true);
+        }
     }, []);
 
-    // Scroll to selected month or to the first interval
+    // Scroll to selected month, to the first interval, or to today
     useEffect(() => {
         if (shouldScrollToMonth) {
             const monthData = parseMonthFromString(shouldScrollToMonth);
@@ -377,8 +391,11 @@ export function ContinuousCalendar() {
 
             scrollToDate(firstInterval.startDate);
             setShouldScrollToFirst(false); // Reset flag
+        } else if (shouldScrollToToday) {
+            scrollToDate(new Date());
+            setShouldScrollToToday(false);
         }
-    }, [shouldScrollToFirst, shouldScrollToMonth, intervals]);
+    }, [shouldScrollToFirst, shouldScrollToMonth, shouldScrollToToday, intervals]);
 
     // Helper function to scroll to a specific date
     const scrollToDate = (date: Date) => {
@@ -722,7 +739,7 @@ export function ContinuousCalendar() {
                                             } else if (day.isVacation) {
                                                 dayClass = 'text-orange-600';
                                             } else if (day.isHoliday || day.isWeekend) {
-                                                dayClass = 'text-rose-600';
+                                                dayClass = 'text-red-600';
                                             }
 
                                             // Determine background colors based on selection status
@@ -743,6 +760,15 @@ export function ContinuousCalendar() {
                                                 bgClass = 'bg-rose-50 hover:bg-rose-100';
                                             }
 
+                                            // Check if today - add ring based on day type and selection
+                                            let todayClass = '';
+                                            if (isToday(day.date)) {
+                                                const isSelectedHolyday =
+                                                    (day.isHoliday || day.isWeekend) &&
+                                                    (dateStatus.isSelected || dateStatus.isInInterval);
+                                                todayClass = `ring-4 md:ring-4 ${isSelectedHolyday ? 'ring-red-600/30' : 'ring-red-600'}`;
+                                            }
+
                                             return (
                                                 <div
                                                     key={`${day.year}-${day.month}-${day.day}`}
@@ -751,7 +777,7 @@ export function ContinuousCalendar() {
                                                 >
                                                     {/* Day cell */}
                                                     <div
-                                                        className={`h-10 w-10 xs:h-12 xs:w-12 sm:h-13 sm:w-13 md:h-14 md:w-14 flex items-center justify-center font-serif text-xl xs:text-2xl md:text-3xl ${bgClass} ${dayClass} rounded-full transition-colors cursor-pointer`}
+                                                        className={`h-10 w-10 xs:h-12 xs:w-12 sm:h-13 sm:w-13 md:h-14 md:w-14 flex items-center justify-center font-serif text-xl xs:text-2xl md:text-3xl ${bgClass} ${dayClass} ${todayClass} rounded-full transition-colors cursor-pointer`}
                                                         onClick={() => handleDateClick(day.date)}
                                                     >
                                                         {day.day}
