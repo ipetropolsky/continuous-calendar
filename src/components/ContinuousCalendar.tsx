@@ -490,30 +490,29 @@ export function ContinuousCalendar() {
                 endDate: sortedEnd,
             };
 
-            setIntervals((prev) => [...prev, newInterval]);
+            const updatedIntervals = [...intervals, newInterval];
             setSelectedStart(null);
-
-            // Update URL when intervals change (only after initialization)
-            const urlParams = new URLSearchParams(window.location.search);
-
-            // Month param is removed when intervals are set
-            urlParams.delete('month');
-            urlParams.delete('dates');
-            if (intervals.length > 0) {
-                // Remove month param if intervals are set
-                intervals.forEach((interval) => {
-                    const encodedInterval = encodeIntervalToURL(interval);
-                    urlParams.append('dates', encodedInterval);
-                });
-            }
-
-            const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
-            window.history.replaceState({}, '', newUrl);
+            updateIntervals(updatedIntervals);
         }
     };
 
+    const updateIntervals = (newIntervals: DateInterval[]) => {
+        setIntervals(newIntervals);
+
+        const urlParams = new URLSearchParams(window.location.search);
+        urlParams.delete('dates');
+        newIntervals.forEach((interval) => {
+            const encodedInterval = encodeIntervalToURL(interval);
+            urlParams.append('dates', encodedInterval);
+        });
+
+        const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
+        window.history.replaceState({}, '', newUrl);
+    };
+
     const removeInterval = (intervalId: string) => {
-        setIntervals((prev) => prev.filter((interval) => interval.id !== intervalId));
+        const updatedIntervals = intervals.filter((interval) => interval.id !== intervalId);
+        updateIntervals(updatedIntervals);
     };
 
     // Check if a date is in any interval
