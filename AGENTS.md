@@ -66,10 +66,26 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 
 ## Development Commands
 ```bash
-npm run dev      # Start dev server (localhost:3000)
-npm run build    # Production build to /build
-npm run deploy   # Deploy to GitHub Pages
-npm run ts-check # TypeScript type checking
+# Start dev server (localhost:3000)
+npm run dev
+
+# Check types
+npm run ts-check
+
+# Lint specific files
+npm run lint-files file1 file2 ...
+
+# Format specific files
+npm run format-files file1 file2 ...
+
+# Check types, lint and format entire repo
+npm run check
+
+# Production build to /build
+npm run build
+
+# Deploy to GitHub Pages
+npm run deploy
 ```
 
 ## Testing
