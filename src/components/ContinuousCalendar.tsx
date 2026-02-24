@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect } from 'react';
 import { X, Settings } from 'lucide-react';
+import { holidayDates, vacationDates, calendarConfig } from '@/config/calendarConfig';
 
 interface CalendarDay {
     date: Date;
@@ -36,82 +37,8 @@ export function ContinuousCalendar() {
     const [settingsVisible, setSettingsVisible] = useState(false);
     const [showVacations, setShowVacations] = useState(false);
     const [showPastDates, setShowPastDates] = useState(false);
-    // Holiday dates in YYYY-MM-DD format
-    const holidayDates = [
-        // 2025 holidays
-        '2025-01-01',
-        '2025-01-02',
-        '2025-01-03',
-        '2025-01-04',
-        '2025-01-05',
-        '2025-01-06',
-        '2025-01-07',
-        '2025-01-08',
-        '2025-02-23',
-        '2025-03-08',
-        '2025-05-01',
-        '2025-05-02',
-        '2025-05-08',
-        '2025-05-09',
-        '2025-06-12',
-        '2025-06-13',
-        '2025-11-03',
-        '2025-11-04',
-        // 2026 holidays
-        '2026-01-01',
-        '2026-01-02',
-        '2026-01-03',
-        '2026-01-04',
-        '2026-01-05',
-        '2026-01-06',
-        '2026-01-07',
-        '2026-01-08',
-        '2026-01-09',
-        '2026-02-23',
-        '2026-03-09',
-        '2026-05-01',
-        '2026-05-11',
-        '2026-06-12',
-        '2026-11-04',
-    ];
 
-    // Vacation dates in YYYY-MM-DD format
-    const vacationDates = [
-        // 2025-10-25 to 2025-11-04
-        '2025-10-25',
-        '2025-10-26',
-        '2025-10-27',
-        '2025-10-28',
-        '2025-10-29',
-        '2025-10-30',
-        '2025-10-31',
-        '2025-11-01',
-        '2025-11-02',
-        '2025-11-03',
-        '2025-11-04',
-        // 2026-02-21 to 2026-03-01
-        '2026-02-21',
-        '2026-02-22',
-        '2026-02-23',
-        '2026-02-24',
-        '2026-02-25',
-        '2026-02-26',
-        '2026-02-27',
-        '2026-02-28',
-        '2026-03-01',
-        // 2026-03-28 to 2026-04-05
-        '2026-03-28',
-        '2026-03-29',
-        '2026-03-30',
-        '2026-03-31',
-        '2026-04-01',
-        '2026-04-02',
-        '2026-04-03',
-        '2026-04-04',
-        '2026-04-05',
-    ];
-
-    const firstVisibleDate = new Date(2026, 0, 1); // Jan 1, 2026
+    const { firstVisibleDate, startDate, endDate, monthNames, weekDayLabels } = calendarConfig;
 
     // Format date to YYYY-MM-DD string
     const formatDateString = (date: Date): string => {
@@ -151,24 +78,7 @@ export function ContinuousCalendar() {
 
     // Generate all days
     const generateCalendarData = (): CalendarDay[] => {
-        const startDate = new Date(2025, 0, 1);
-        const endDate = new Date(2027, 11, 31);
         const days: CalendarDay[] = [];
-
-        const monthNames = [
-            'January',
-            'February',
-            'March',
-            'April',
-            'May',
-            'June',
-            'July',
-            'August',
-            'September',
-            'October',
-            'November',
-            'December',
-        ];
 
         const currentDate = new Date(startDate);
         let lastMonth = -1;
@@ -235,8 +145,6 @@ export function ContinuousCalendar() {
 
     const days = generateCalendarData();
     const weeks = organizeIntoWeeks(days);
-
-    const weekDayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
     // Calculate which weeks have new months for sidebar positioning
     const getMonthPositions = () => {
