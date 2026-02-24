@@ -30,7 +30,6 @@ interface DateStatus {
 export function ContinuousCalendar() {
     const [intervals, setIntervals] = useState<DateInterval[]>([]);
     const [selectedStart, setSelectedStart] = useState<Date | null>(null);
-    const [isInitialized, setIsInitialized] = useState(false);
     const [shouldScrollToFirst, setShouldScrollToFirst] = useState(false);
     const [shouldScrollToMonth, setShouldScrollToMonth] = useState<string | null>(null);
     const [showSettings, setShowSettings] = useState(false);
@@ -135,7 +134,9 @@ export function ContinuousCalendar() {
 
     // Check if a date is a vacation (only if showVacations is enabled)
     const isVacation = (date: Date): boolean => {
-        if (!showVacations) return false;
+        if (!showVacations) {
+            return false;
+        }
         const dateString = formatDateString(date);
         return vacationDates.includes(dateString) && !holidayDates.includes(dateString);
     };
@@ -169,7 +170,7 @@ export function ContinuousCalendar() {
             'December',
         ];
 
-        let currentDate = new Date(startDate);
+        const currentDate = new Date(startDate);
         let lastMonth = -1;
 
         while (currentDate <= endDate) {
@@ -199,16 +200,16 @@ export function ContinuousCalendar() {
     };
 
     // Organize days into weeks starting with Monday
-    const organizeIntoWeeks = (days: CalendarDay[]): CalendarDay[][] => {
-        const weeks: CalendarDay[][] = [];
-        let currentWeek: CalendarDay[] = [];
+    const organizeIntoWeeks = (days: CalendarDay[]): (CalendarDay | null)[][] => {
+        const weeks: (CalendarDay | null)[][] = [];
+        let currentWeek: (CalendarDay | null)[] = [];
 
         // Add empty slots for the beginning if the year doesn't start on Monday
         const firstDay = days[0].date;
         const firstDayOfWeek = (firstDay.getDay() + 6) % 7; // Convert Sunday=0 to Monday=0
 
         for (let i = 0; i < firstDayOfWeek; i++) {
-            currentWeek.push(null as any);
+            currentWeek.push(null);
         }
 
         days.forEach((day) => {
@@ -224,7 +225,7 @@ export function ContinuousCalendar() {
         if (currentWeek.length > 0) {
             // Fill the rest of the week with empty slots
             while (currentWeek.length < 7) {
-                currentWeek.push(null as any);
+                currentWeek.push(null);
             }
             weeks.push(currentWeek);
         }
@@ -256,8 +257,10 @@ export function ContinuousCalendar() {
     };
 
     // Check if a week should be hidden (all days before firstVisibleDate)
-    const shouldHideWeek = (week: CalendarDay[]): boolean => {
-        if (showPastDates) return false;
+    const shouldHideWeek = (week: (CalendarDay | null)[]): boolean => {
+        if (showPastDates) {
+            return false;
+        }
         // Check if all days in week are before firstVisibleDate
         // Note: week may contain null slots for empty days
         for (const day of week) {
@@ -278,7 +281,9 @@ export function ContinuousCalendar() {
     };
 
     const decodeIntervalFromURL = (urlParam: string): DateInterval | null => {
-        if (!urlParam) return null;
+        if (!urlParam) {
+            return null;
+        }
 
         try {
             const [startStr, endStr] = urlParam.split('-');
@@ -300,7 +305,9 @@ export function ContinuousCalendar() {
     };
 
     const parseStringToDate = (dateStr: string): Date => {
-        if (dateStr.length !== 6) throw new Error('Invalid date format');
+        if (dateStr.length !== 6) {
+            throw new Error('Invalid date format');
+        }
 
         const year = parseInt(`20${dateStr.slice(0, 2)}`);
         const month = parseInt(dateStr.slice(2, 4)) - 1; // Month is 0-indexed
@@ -359,7 +366,6 @@ export function ContinuousCalendar() {
         }
 
         setShowPastDates(shouldShowPastDatesInitially);
-        setIsInitialized(true);
     }, []);
 
     // Scroll to selected month or to the first interval
@@ -421,7 +427,9 @@ export function ContinuousCalendar() {
 
     // Parse month from URL string (YYMM)
     const parseMonthFromString = (monthStr: string): { year: number; month: number } | null => {
-        if (monthStr.length !== 4) return null;
+        if (monthStr.length !== 4) {
+            return null;
+        }
 
         try {
             const year = parseInt(`20${monthStr.slice(0, 2)}`);
@@ -524,7 +532,12 @@ export function ContinuousCalendar() {
             return { isSelected: true, isInInterval: false, intervalId: null, isIntervalEnd: false };
         }
 
-        let dateStatus: DateStatus = { isSelected: false, isInInterval: false, intervalId: null, isIntervalEnd: false };
+        const dateStatus: DateStatus = {
+            isSelected: false,
+            isInInterval: false,
+            intervalId: null,
+            isIntervalEnd: false,
+        };
 
         // Check if date is in any interval
         for (const interval of intervals) {
