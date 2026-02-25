@@ -1,31 +1,44 @@
 {
-    "name": "continuous-calendar",
-    "description": "Continuous Calendar 2025-2026",
-    "version": "0.1.0",
-    "private": true,
-    "dependencies": {
-        "lucide-react": "^0.544.0",
-        "react": "^18.3.1",
-        "react-dom": "^18.3.1"
-    },
-    "devDependencies": {
-        "@tailwindcss/postcss": "^4.1.13",
-        "@types/node": "^20.10.0",
-        "@types/react": "^19.1.13",
-        "@types/react-dom": "^19.1.9",
-        "@vitejs/plugin-react-swc": "^3.10.2",
-        "autoprefixer": "^10.4.21",
-        "gh-pages": "^6.3.0",
-        "postcss": "^8.5.6",
-        "prettier": "^3.6.2",
-        "tailwindcss": "^4.1.13",
-        "typescript": "^5.9.2",
-        "vite": "7.1.5"
-    },
-    "scripts": {
-        "dev": "vite",
-        "build": "vite build",
-        "ts-check": "tsc --noEmit",
-        "deploy": "gh-pages -d build"
-    }
+  "name": "continuous-calendar",
+  "description": "Continuous Calendar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "lucide-react": "0.575.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.3",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "25.3.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react-swc": "4.2.3",
+    "autoprefixer": "10.4.24",
+    "eslint": "9.39.3",
+    "gh-pages": "6.3.0",
+    "lint-staged": "15.5.0",
+    "postcss": "8.5.6",
+    "prettier": "3.8.1",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.56.1",
+    "vite": "7.3.1"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "ts-check": "tsc --noEmit",
+    "lint": "eslint --fix .",
+    "lint-files": "eslint --fix",
+    "format": "prettier --write --ignore-unknown .",
+    "format-files": "prettier --write --ignore-unknown",
+    "check": "npm run ts-check && npm run lint && npm run format",
+    "deploy": "npm run build && gh-pages -d build",
+    "deps:latest": "node tools/get-latest-deps.js",
+    "lint-staged": "lint-staged",
+    "postinstall": "cp tools/githooks/* .git/hooks || true"
+  }
 }

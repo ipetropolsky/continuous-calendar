@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect } from 'react';
 import { X, Settings } from 'lucide-react';
+import { holidayDates, vacationDates, calendarConfig } from '@/config/calendarConfig';
 
 interface CalendarDay {
     date: Date;
@@ -30,89 +31,15 @@ interface DateStatus {
 export function ContinuousCalendar() {
     const [intervals, setIntervals] = useState<DateInterval[]>([]);
     const [selectedStart, setSelectedStart] = useState<Date | null>(null);
-    const [isInitialized, setIsInitialized] = useState(false);
     const [shouldScrollToFirst, setShouldScrollToFirst] = useState(false);
     const [shouldScrollToMonth, setShouldScrollToMonth] = useState<string | null>(null);
     const [showSettings, setShowSettings] = useState(false);
     const [settingsVisible, setSettingsVisible] = useState(false);
     const [showVacations, setShowVacations] = useState(false);
     const [showPastDates, setShowPastDates] = useState(false);
-    // Holiday dates in YYYY-MM-DD format
-    const holidayDates = [
-        // 2025 holidays
-        '2025-01-01',
-        '2025-01-02',
-        '2025-01-03',
-        '2025-01-04',
-        '2025-01-05',
-        '2025-01-06',
-        '2025-01-07',
-        '2025-01-08',
-        '2025-02-23',
-        '2025-03-08',
-        '2025-05-01',
-        '2025-05-02',
-        '2025-05-08',
-        '2025-05-09',
-        '2025-06-12',
-        '2025-06-13',
-        '2025-11-03',
-        '2025-11-04',
-        // 2026 holidays
-        '2026-01-01',
-        '2026-01-02',
-        '2026-01-03',
-        '2026-01-04',
-        '2026-01-05',
-        '2026-01-06',
-        '2026-01-07',
-        '2026-01-08',
-        '2026-01-09',
-        '2026-02-23',
-        '2026-03-09',
-        '2026-05-01',
-        '2026-05-11',
-        '2026-06-12',
-        '2026-11-04',
-    ];
+    const [shouldScrollToToday, setShouldScrollToToday] = useState(false);
 
-    // Vacation dates in YYYY-MM-DD format
-    const vacationDates = [
-        // 2025-10-25 to 2025-11-04
-        '2025-10-25',
-        '2025-10-26',
-        '2025-10-27',
-        '2025-10-28',
-        '2025-10-29',
-        '2025-10-30',
-        '2025-10-31',
-        '2025-11-01',
-        '2025-11-02',
-        '2025-11-03',
-        '2025-11-04',
-        // 2026-02-21 to 2026-03-01
-        '2026-02-21',
-        '2026-02-22',
-        '2026-02-23',
-        '2026-02-24',
-        '2026-02-25',
-        '2026-02-26',
-        '2026-02-27',
-        '2026-02-28',
-        '2026-03-01',
-        // 2026-03-28 to 2026-04-05
-        '2026-03-28',
-        '2026-03-29',
-        '2026-03-30',
-        '2026-03-31',
-        '2026-04-01',
-        '2026-04-02',
-        '2026-04-03',
-        '2026-04-04',
-        '2026-04-05',
-    ];
-
-    const firstVisibleDate = new Date(2026, 0, 1); // Jan 1, 2026
+    const { firstVisibleDate, startDate, endDate, monthNames, weekDayLabels } = calendarConfig;
 
     // Format date to YYYY-MM-DD string
     const formatDateString = (date: Date): string => {
@@ -127,6 +54,16 @@ export function ContinuousCalendar() {
         return date < firstVisibleDate;
     };
 
+    // Check if date is today
+    const isToday = (date: Date): boolean => {
+        const today = new Date();
+        return (
+            date.getFullYear() === today.getFullYear() &&
+            date.getMonth() === today.getMonth() &&
+            date.getDate() === today.getDate()
+        );
+    };
+
     // Check if a date is a holiday
     const isHoliday = (date: Date): boolean => {
         const dateString = formatDateString(date);
@@ -135,7 +72,9 @@ export function ContinuousCalendar() {
 
     // Check if a date is a vacation (only if showVacations is enabled)
     const isVacation = (date: Date): boolean => {
-        if (!showVacations) return false;
+        if (!showVacations) {
+            return false;
+        }
         const dateString = formatDateString(date);
         return vacationDates.includes(dateString) && !holidayDates.includes(dateString);
     };
@@ -150,26 +89,9 @@ export function ContinuousCalendar() {
 
     // Generate all days
     const generateCalendarData = (): CalendarDay[] => {
-        const startDate = new Date(2025, 0, 1);
-        const endDate = new Date(2027, 11, 31);
         const days: CalendarDay[] = [];
 
-        const monthNames = [
-            'January',
-            'February',
-            'March',
-            'April',
-            'May',
-            'June',
-            'July',
-            'August',
-            'September',
-            'October',
-            'November',
-            'December',
-        ];
-
-        let currentDate = new Date(startDate);
+        const currentDate = new Date(startDate);
         let lastMonth = -1;
 
         while (currentDate <= endDate) {
@@ -199,16 +121,16 @@ export function ContinuousCalendar() {
     };
 
     // Organize days into weeks starting with Monday
-    const organizeIntoWeeks = (days: CalendarDay[]): CalendarDay[][] => {
-        const weeks: CalendarDay[][] = [];
-        let currentWeek: CalendarDay[] = [];
+    const organizeIntoWeeks = (days: CalendarDay[]): (CalendarDay | null)[][] => {
+        const weeks: (CalendarDay | null)[][] = [];
+        let currentWeek: (CalendarDay | null)[] = [];
 
         // Add empty slots for the beginning if the year doesn't start on Monday
         const firstDay = days[0].date;
         const firstDayOfWeek = (firstDay.getDay() + 6) % 7; // Convert Sunday=0 to Monday=0
 
         for (let i = 0; i < firstDayOfWeek; i++) {
-            currentWeek.push(null as any);
+            currentWeek.push(null);
         }
 
         days.forEach((day) => {
@@ -224,7 +146,7 @@ export function ContinuousCalendar() {
         if (currentWeek.length > 0) {
             // Fill the rest of the week with empty slots
             while (currentWeek.length < 7) {
-                currentWeek.push(null as any);
+                currentWeek.push(null);
             }
             weeks.push(currentWeek);
         }
@@ -234,8 +156,6 @@ export function ContinuousCalendar() {
 
     const days = generateCalendarData();
     const weeks = organizeIntoWeeks(days);
-
-    const weekDayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
     // Calculate which weeks have new months for sidebar positioning
     const getMonthPositions = () => {
@@ -256,8 +176,10 @@ export function ContinuousCalendar() {
     };
 
     // Check if a week should be hidden (all days before firstVisibleDate)
-    const shouldHideWeek = (week: CalendarDay[]): boolean => {
-        if (showPastDates) return false;
+    const shouldHideWeek = (week: (CalendarDay | null)[]): boolean => {
+        if (showPastDates) {
+            return false;
+        }
         // Check if all days in week are before firstVisibleDate
         // Note: week may contain null slots for empty days
         for (const day of week) {
@@ -278,7 +200,9 @@ export function ContinuousCalendar() {
     };
 
     const decodeIntervalFromURL = (urlParam: string): DateInterval | null => {
-        if (!urlParam) return null;
+        if (!urlParam) {
+            return null;
+        }
 
         try {
             const [startStr, endStr] = urlParam.split('-');
@@ -300,7 +224,9 @@ export function ContinuousCalendar() {
     };
 
     const parseStringToDate = (dateStr: string): Date => {
-        if (dateStr.length !== 6) throw new Error('Invalid date format');
+        if (dateStr.length !== 6) {
+            throw new Error('Invalid date format');
+        }
 
         const year = parseInt(`20${dateStr.slice(0, 2)}`);
         const month = parseInt(dateStr.slice(2, 4)) - 1; // Month is 0-indexed
@@ -359,10 +285,14 @@ export function ContinuousCalendar() {
         }
 
         setShowPastDates(shouldShowPastDatesInitially);
-        setIsInitialized(true);
+
+        // Set scroll to today if no intervals or month param
+        if (parsedIntervals.length === 0 && !monthParam) {
+            setShouldScrollToToday(true);
+        }
     }, []);
 
-    // Scroll to selected month or to the first interval
+    // Scroll to selected month, to the first interval, or to today
     useEffect(() => {
         if (shouldScrollToMonth) {
             const monthData = parseMonthFromString(shouldScrollToMonth);
@@ -377,8 +307,11 @@ export function ContinuousCalendar() {
 
             scrollToDate(firstInterval.startDate);
             setShouldScrollToFirst(false); // Reset flag
+        } else if (shouldScrollToToday) {
+            scrollToDate(new Date());
+            setShouldScrollToToday(false);
         }
-    }, [shouldScrollToFirst, shouldScrollToMonth, intervals]);
+    }, [shouldScrollToFirst, shouldScrollToMonth, shouldScrollToToday, intervals]);
 
     // Helper function to scroll to a specific date
     const scrollToDate = (date: Date) => {
@@ -421,7 +354,9 @@ export function ContinuousCalendar() {
 
     // Parse month from URL string (YYMM)
     const parseMonthFromString = (monthStr: string): { year: number; month: number } | null => {
-        if (monthStr.length !== 4) return null;
+        if (monthStr.length !== 4) {
+            return null;
+        }
 
         try {
             const year = parseInt(`20${monthStr.slice(0, 2)}`);
@@ -524,7 +459,12 @@ export function ContinuousCalendar() {
             return { isSelected: true, isInInterval: false, intervalId: null, isIntervalEnd: false };
         }
 
-        let dateStatus: DateStatus = { isSelected: false, isInInterval: false, intervalId: null, isIntervalEnd: false };
+        const dateStatus: DateStatus = {
+            isSelected: false,
+            isInInterval: false,
+            intervalId: null,
+            isIntervalEnd: false,
+        };
 
         // Check if date is in any interval
         for (const interval of intervals) {
@@ -722,7 +662,7 @@ export function ContinuousCalendar() {
                                             } else if (day.isVacation) {
                                                 dayClass = 'text-orange-600';
                                             } else if (day.isHoliday || day.isWeekend) {
-                                                dayClass = 'text-rose-600';
+                                                dayClass = 'text-red-600';
                                             }
 
                                             // Determine background colors based on selection status
@@ -743,6 +683,11 @@ export function ContinuousCalendar() {
                                                 bgClass = 'bg-rose-50 hover:bg-rose-100';
                                             }
 
+                                            // Check if today - add ring based on day type and selection
+                                            const todayClass = isToday(day.date)
+                                                ? 'ring-4 md:ring-4 ring-red-600/30'
+                                                : '';
+
                                             return (
                                                 <div
                                                     key={`${day.year}-${day.month}-${day.day}`}
@@ -751,7 +696,7 @@ export function ContinuousCalendar() {
                                                 >
                                                     {/* Day cell */}
                                                     <div
-                                                        className={`h-10 w-10 xs:h-12 xs:w-12 sm:h-13 sm:w-13 md:h-14 md:w-14 flex items-center justify-center font-serif text-xl xs:text-2xl md:text-3xl ${bgClass} ${dayClass} rounded-full transition-colors cursor-pointer`}
+                                                        className={`h-10 w-10 xs:h-12 xs:w-12 sm:h-13 sm:w-13 md:h-14 md:w-14 flex items-center justify-center font-serif text-xl xs:text-2xl md:text-3xl ${bgClass} ${dayClass} ${todayClass} rounded-full transition-colors cursor-pointer`}
                                                         onClick={() => handleDateClick(day.date)}
                                                     >
                                                         {day.day}
