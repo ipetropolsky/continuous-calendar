@@ -1,6 +1,8 @@
-import { useState, useEffect, useLayoutEffect } from 'react';
-import { X, Settings } from 'lucide-react';
-import { holidayDates, vacationDates, calendarConfig } from '@/config/calendarConfig';
+import { useEffect, useLayoutEffect, useState } from 'react';
+
+import { Settings, X } from 'lucide-react';
+
+import { calendarConfig, holidayDates, vacationDates } from '@/config/calendarConfig';
 
 interface CalendarDay {
     date: Date;
