@@ -30,8 +30,9 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 
 **Parameters:**
 
-- `dates`: Encoded intervals in format `YYMMDD-YYMMDD,YYMMDD-YYMMDD`
-    - Example: `?dates=250101-250115,250201-250215`
+- `dates`: Encoded intervals, one param per interval, format `YYMMDD-YYMMDD[_cityId]`
+    - Example: `?dates=250101-250115_524901&dates=250201-250215`
+    - `cityId` is an Open-Meteo geocoding (geonames) id, optional
 - `month`: Month to scroll to in format `YYMM`
     - Example: `?month=2506` (June 2025)
 - `vc`: Show vacation dates (`?vc=true`)
@@ -67,6 +68,12 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 - Desktop: sidebar with month labels positioned by week index
 - Mobile: month labels rotate -90° above first day of month
 - Month click updates URL and scrolls to month
+
+### Weather
+
+- Open-Meteo API (no key) in `src/services/weather.ts`: city search/lookup, daily weather (forecast up to 16 days ahead, archive for the past)
+- Each interval has its own city; weather icon in the top-left corner of interval days, click opens `CityPicker`
+- New interval gets the last chosen city (localStorage `lastCity`) and opens `CityPicker`
 
 ### Settings
 

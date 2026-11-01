@@ -1,8 +1,18 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 
-import { Settings, X } from 'lucide-react';
+import { MapPin, Settings, X } from 'lucide-react';
 
+import { CityPicker } from '@/components/CityPicker';
 import { calendarConfig, holidayDates, vacationDates } from '@/config/calendarConfig';
+import {
+    type City,
+    fetchDailyWeather,
+    getCityById,
+    getWeatherInfo,
+    loadLastCity,
+    saveLastCity,
+    type WeatherByDate,
+} from '@/services/weather';
 
 interface CalendarDay {
     date: Date;
@@ -21,6 +31,7 @@ interface DateInterval {
     id: string;
     startDate: Date;
     endDate: Date;
+    cityId?: number;
 }
 
 interface DateStatus {
@@ -28,6 +39,7 @@ interface DateStatus {
     isInInterval: boolean;
     intervalId: string | null;
     isIntervalEnd: boolean;
+    endIntervalId: string | null; // Interval that ends on this date (may differ from intervalId for overlapping intervals)
 }
 
 export function ContinuousCalendar() {
@@ -40,6 +52,14 @@ export function ContinuousCalendar() {
     const [showVacations, setShowVacations] = useState(false);
     const [showPastDates, setShowPastDates] = useState(false);
     const [shouldScrollToToday, setShouldScrollToToday] = useState(false);
+    const [lastCity, setLastCity] = useState<City | null>(loadLastCity);
+    const [cities, setCities] = useState<Record<number, City>>(() => {
+        const storedCity = loadLastCity();
+        return storedCity ? { [storedCity.id]: storedCity } : {};
+    });
+    const [weather, setWeather] = useState<Record<number, WeatherByDate>>({});
+    const [cityPickerIntervalId, setCityPickerIntervalId] = useState<string | null>(null);
+    const closeCityPicker = useCallback(() => setCityPickerIntervalId(null), []);
 
     const { firstVisibleDate, startDate, endDate, monthNames, weekDayLabels } = calendarConfig;
 
@@ -198,7 +218,8 @@ export function ContinuousCalendar() {
     const encodeIntervalToURL = (interval: DateInterval): string => {
         const startStr = formatDateToString(interval.startDate);
         const endStr = formatDateToString(interval.endDate);
-        return `${startStr}-${endStr}`;
+        const cityStr = interval.cityId ? `_${interval.cityId}` : '';
+        return `${startStr}-${endStr}${cityStr}`;
     };
 
     const decodeIntervalFromURL = (urlParam: string): DateInterval | null => {
@@ -207,11 +228,14 @@ export function ContinuousCalendar() {
         }
 
         try {
-            const [startStr, endStr] = urlParam.split('-');
+            const [datesStr, cityStr] = urlParam.split('_');
+            const [startStr, endStr] = datesStr.split('-');
+            const cityId = cityStr ? parseInt(cityStr) : NaN;
             return {
                 id: `${Date.now()}-${Math.random()}`,
                 startDate: parseStringToDate(startStr),
                 endDate: parseStringToDate(endStr),
+                cityId: Number.isNaN(cityId) ? undefined : cityId,
             };
         } catch {
             return null;
@@ -252,6 +276,7 @@ export function ContinuousCalendar() {
 
         if (parsedIntervals.length > 0) {
             setIntervals(parsedIntervals);
+            loadIntervalCities(parsedIntervals);
             // Scroll to first interval if month param is not set
             if (!monthParam) {
                 setShouldScrollToFirst(true);
@@ -293,6 +318,46 @@ export function ContinuousCalendar() {
             setShouldScrollToToday(true);
         }
     }, []);
+
+    // Load cities from URL intervals that are not known yet
+    const loadIntervalCities = (intervalsToLoad: DateInterval[]) => {
+        const cityIds = new Set(intervalsToLoad.map((interval) => interval.cityId).filter((cityId) => !!cityId));
+        const lastIntervalCityId = intervalsToLoad[intervalsToLoad.length - 1]?.cityId;
+
+        cityIds.forEach((cityId) => {
+            if (cities[cityId!]) {
+                return;
+            }
+            getCityById(cityId!).then((city) => {
+                if (!city) {
+                    return;
+                }
+                setCities((prev) => ({ ...prev, [city.id]: city }));
+                // Use city of the last interval as default if nothing was chosen before
+                if (city.id === lastIntervalCityId) {
+                    setLastCity((prev) => prev ?? city);
+                }
+            });
+        });
+    };
+
+    // Load weather for intervals with known cities
+    useEffect(() => {
+        intervals.forEach((interval) => {
+            const city = interval.cityId ? cities[interval.cityId] : null;
+            if (!city) {
+                return;
+            }
+            fetchDailyWeather(city, interval.startDate, interval.endDate)
+                .then((weatherByDate) => {
+                    if (Object.keys(weatherByDate).length === 0) {
+                        return;
+                    }
+                    setWeather((prev) => ({ ...prev, [city.id]: { ...prev[city.id], ...weatherByDate } }));
+                })
+                .catch((error) => console.error('Failed to load weather:', error));
+        });
+    }, [intervals, cities]);
 
     // Scroll to selected month, to the first interval, or to today
     useEffect(() => {
@@ -425,12 +490,72 @@ export function ContinuousCalendar() {
                 id: `${Date.now()}-${Math.random()}`,
                 startDate: sortedStart,
                 endDate: sortedEnd,
+                cityId: lastCity?.id,
             };
 
             const updatedIntervals = [...intervals, newInterval];
             setSelectedStart(null);
             updateIntervals(updatedIntervals);
+            setCityPickerIntervalId(newInterval.id);
         }
+    };
+
+    const handleCitySelect = (intervalId: string, city: City) => {
+        setCities((prev) => ({ ...prev, [city.id]: city }));
+        setLastCity(city);
+        saveLastCity(city);
+        setCityPickerIntervalId(null);
+        updateIntervals(
+            intervals.map((interval) => (interval.id === intervalId ? { ...interval, cityId: city.id } : interval))
+        );
+    };
+
+    const getIntervalCity = (interval: DateInterval | undefined): City | null =>
+        interval?.cityId ? (cities[interval.cityId] ?? null) : null;
+
+    // Weather of all intervals covering the date in intervals order, grouped by weather icon
+    const getDayWeathers = (date: Date) => {
+        const dateString = formatDateString(date);
+        const dayWeathers: { interval: DateInterval; info: ReturnType<typeof getWeatherInfo>; titles: string[] }[] = [];
+        const cityIds = new Set<number>();
+
+        for (const interval of intervals) {
+            if (date < interval.startDate || date > interval.endDate || !interval.cityId) {
+                continue;
+            }
+            const dayWeather = weather[interval.cityId]?.[dateString];
+            if (!dayWeather || cityIds.has(interval.cityId)) {
+                continue;
+            }
+            cityIds.add(interval.cityId);
+
+            const info = getWeatherInfo(dayWeather.code);
+            const title = `${getIntervalCity(interval)?.name ?? ''}: ${info.description}, ${Math.round(dayWeather.tMax)}° / ${Math.round(dayWeather.tMin)}°`;
+            const sameWeather = dayWeathers.find((item) => item.info.icon === info.icon);
+            if (sameWeather) {
+                sameWeather.titles.push(title);
+            } else {
+                dayWeathers.push({ interval, info, titles: [title] });
+            }
+        }
+
+        return dayWeathers;
+    };
+
+    // Check if any day of the interval has weather data
+    const hasIntervalWeather = (interval: DateInterval): boolean => {
+        const cityWeather = interval.cityId ? weather[interval.cityId] : undefined;
+        if (!cityWeather) {
+            return false;
+        }
+        const currentDate = new Date(interval.startDate);
+        while (currentDate <= interval.endDate) {
+            if (cityWeather[formatDateString(currentDate)]) {
+                return true;
+            }
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+        return false;
     };
 
     const updateIntervals = (newIntervals: DateInterval[]) => {
@@ -450,6 +575,9 @@ export function ContinuousCalendar() {
     const removeInterval = (intervalId: string) => {
         const updatedIntervals = intervals.filter((interval) => interval.id !== intervalId);
         updateIntervals(updatedIntervals);
+        if (cityPickerIntervalId === intervalId) {
+            setCityPickerIntervalId(null);
+        }
     };
 
     // Check if a date is in any interval
@@ -458,7 +586,13 @@ export function ContinuousCalendar() {
 
         // Check if date is selected as start
         if (selectedStart && selectedStart.getTime() === dateTime) {
-            return { isSelected: true, isInInterval: false, intervalId: null, isIntervalEnd: false };
+            return {
+                isSelected: true,
+                isInInterval: false,
+                intervalId: null,
+                isIntervalEnd: false,
+                endIntervalId: null,
+            };
         }
 
         const dateStatus: DateStatus = {
@@ -466,6 +600,7 @@ export function ContinuousCalendar() {
             isInInterval: false,
             intervalId: null,
             isIntervalEnd: false,
+            endIntervalId: null,
         };
 
         // Check if date is in any interval
@@ -476,7 +611,10 @@ export function ContinuousCalendar() {
             if (dateTime >= startTime && dateTime <= endTime) {
                 dateStatus.isInInterval = true;
                 dateStatus.intervalId = interval.id;
-                dateStatus.isIntervalEnd = dateStatus.isIntervalEnd || dateTime === endTime;
+                if (dateTime === endTime) {
+                    dateStatus.isIntervalEnd = true;
+                    dateStatus.endIntervalId = interval.id;
+                }
             }
         }
 
@@ -623,11 +761,21 @@ export function ContinuousCalendar() {
                         {weeks.map((week, weekIndex) => {
                             // Check if this week has the first day of a new month
                             const firstDayOfMonth = week.find((day) => day && day.isNewMonth);
+                            // Raise the week above the following ones if it contains the open city picker
+                            const hasCityPicker = week.some(
+                                (day) =>
+                                    day &&
+                                    intervals.some(
+                                        (interval) =>
+                                            interval.id === cityPickerIntervalId &&
+                                            interval.endDate.getTime() === day.date.getTime()
+                                    )
+                            );
 
                             return (
                                 <div
                                     key={weekIndex}
-                                    className={`relative z-10 transition-all duration-500 ease-in-out ${
+                                    className={`relative ${hasCityPicker ? 'z-30' : 'z-10'} transition-all duration-500 ease-in-out ${
                                         shouldHideWeek(week)
                                             ? 'max-h-0 overflow-hidden mb-0 opacity-0'
                                             : 'max-h-[10000px] opacity-100 mb-2 md:mb-0'
@@ -690,6 +838,17 @@ export function ContinuousCalendar() {
                                                 ? 'ring-4 md:ring-4 ring-red-600/30'
                                                 : '';
 
+                                            // Weather for days in intervals with a chosen city
+                                            const dayWeathers = dateStatus.isInInterval ? getDayWeathers(day.date) : [];
+                                            // Interval ending on this date: owns delete button, city button and city picker
+                                            const endInterval = dateStatus.endIntervalId
+                                                ? intervals.find(({ id }) => id === dateStatus.endIntervalId)
+                                                : undefined;
+                                            // City picker button for the interval end if there is no weather to click on
+                                            const showCityButton = !!endInterval && !hasIntervalWeather(endInterval);
+                                            const isCityPickerOpen =
+                                                !!endInterval && endInterval.id === cityPickerIntervalId;
+
                                             return (
                                                 <div
                                                     key={`${day.year}-${day.month}-${day.day}`}
@@ -710,11 +869,62 @@ export function ContinuousCalendar() {
                                                             className="absolute -top-1 -right-1 w-4 h-4 md:w-5 md:h-5 bg-red-500 text-white rounded-full hover:bg-red-600 flex items-center justify-center cursor-pointer"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                removeInterval(dateStatus.intervalId!);
+                                                                removeInterval(dateStatus.endIntervalId!);
                                                             }}
                                                         >
                                                             <X className="w-2.5 h-2.5 md:w-3 md:h-3" />
                                                         </button>
+                                                    )}
+
+                                                    {/* Weather icons for interval days, overlapping left to right */}
+                                                    {dayWeathers.length > 0 && (
+                                                        <div className="absolute -top-1.5 -left-1.5 flex -space-x-2">
+                                                            {dayWeathers.map(
+                                                                ({ interval, info: weatherInfo, titles }) => {
+                                                                    return (
+                                                                        <button
+                                                                            key={interval.id}
+                                                                            className="w-6 h-6 md:w-7 md:h-7 bg-white rounded-full shadow flex items-center justify-center cursor-pointer hover:bg-gray-100"
+                                                                            title={titles.join('\n')}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                setCityPickerIntervalId(interval.id);
+                                                                            }}
+                                                                        >
+                                                                            <weatherInfo.icon
+                                                                                className={`w-4 h-4 md:w-5 md:h-5 ${weatherInfo.color}`}
+                                                                            />
+                                                                        </button>
+                                                                    );
+                                                                }
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {/* City button when weather is not available */}
+                                                    {endInterval && showCityButton && dayWeathers.length === 0 && (
+                                                        <button
+                                                            className="absolute -top-1.5 -left-1.5 w-6 h-6 md:w-7 md:h-7 bg-white rounded-full shadow flex items-center justify-center cursor-pointer hover:bg-gray-100"
+                                                            title={
+                                                                getIntervalCity(endInterval)?.name ?? 'Choose a city'
+                                                            }
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setCityPickerIntervalId(endInterval.id);
+                                                            }}
+                                                        >
+                                                            <MapPin className="w-4 h-4 md:w-5 md:h-5 text-slate-500" />
+                                                        </button>
+                                                    )}
+
+                                                    {/* City picker for the interval */}
+                                                    {endInterval && isCityPickerOpen && (
+                                                        <CityPicker
+                                                            currentCity={getIntervalCity(endInterval)}
+                                                            align={dayIndex >= 4 ? 'right' : 'left'}
+                                                            onSelect={(city) => handleCitySelect(endInterval.id, city)}
+                                                            onClose={closeCityPicker}
+                                                        />
                                                     )}
                                                 </div>
                                             );
