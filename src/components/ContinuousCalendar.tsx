@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { CalendarRange, MapPin, Settings, X } from 'lucide-react';
 
@@ -171,6 +171,7 @@ export function ContinuousCalendar() {
         setTimeout(() => setShowSettings(false), 200);
     }, []);
     const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_PANEL_MEDIA).matches);
+    const desktopPanelRef = useRef<HTMLDivElement>(null);
 
     const { startDate, endDate, monthNames, weekDayLabels } = calendarConfig;
 
@@ -465,6 +466,29 @@ export function ContinuousCalendar() {
                 .catch((error) => console.error('Failed to load typical weather:', error));
         });
     }, [intervals, cities, defaultCity]);
+
+    // Desktop panel fits the viewport from its current top, also before it sticks, so its own scroll reaches the end
+    useEffect(() => {
+        const panel = desktopPanelRef.current;
+        if (!isDesktop || !panel) {
+            return;
+        }
+        let frame = 0;
+        const updateMaxHeight = () => {
+            cancelAnimationFrame(frame);
+            frame = requestAnimationFrame(() => {
+                panel.style.maxHeight = `${window.innerHeight - Math.max(0, panel.getBoundingClientRect().top)}px`;
+            });
+        };
+        updateMaxHeight();
+        window.addEventListener('scroll', updateMaxHeight, { passive: true });
+        window.addEventListener('resize', updateMaxHeight);
+        return () => {
+            cancelAnimationFrame(frame);
+            window.removeEventListener('scroll', updateMaxHeight);
+            window.removeEventListener('resize', updateMaxHeight);
+        };
+    }, [isDesktop]);
 
     // Switch between the desktop panel and the mobile sheet
     useEffect(() => {
@@ -1113,7 +1137,10 @@ export function ContinuousCalendar() {
 
                 {/* Intervals panel - wide screens only */}
                 <aside className="hidden lg:block w-72 flex-shrink-0">
-                    <div className="sticky top-14 max-h-[calc(100vh-4.5rem)] overflow-y-auto px-1 pb-4">
+                    <div
+                        ref={desktopPanelRef}
+                        className="sticky top-14 max-h-[calc(100vh-3.5rem)] overflow-y-auto px-1 pb-8"
+                    >
                         {isDesktop && intervalsPanel}
                     </div>
                 </aside>
