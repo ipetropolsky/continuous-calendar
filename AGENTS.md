@@ -62,7 +62,8 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 ### Calendar Data Generation
 
 - Generates days from Jan 1, 2025 to Dec 31, 2027 (`calendarConfig`)
-- Visible range starts at `visibleFrom`: Monday 2 weeks before today, or earlier if intervals/month from the URL need it. Earlier weeks are hidden, each "Past" click shows 3 more months. Weather is loaded only for visible days
+- Visible range starts at `visibleFrom`: Monday 2 weeks before today, or earlier if intervals/month from the URL need it. Earlier weeks are hidden (their days are not rendered), each "Past" click shows 3 more months. Weather is loaded only for visible days
+- Calendar data (`days`, `weeks`) is memoized, day cells are the memoized `DayCell` with primitive props and stable handlers (latest-ref), so a state change re-renders only changed days. Keep it this way: the calendar has hundreds of cells with inline SVG
 - Organizes into weeks starting with Monday
 - Holiday/vacation dates hardcoded in arrays (YYYY-MM-DD format)
 - Day classification: working days, weekends, holidays, vacations
@@ -85,10 +86,11 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 ### Intervals panel
 
 - `IntervalsPanel`: default city and the list of intervals with city picker, delete and scroll-to-interval
-- Wide screens (`min-width: 64rem`): sticky column on the right; narrow screens: floating button opens `BottomSheet` (full-screen, slides from the bottom, closes with swipe down anywhere unless inner content is scrolled)
+- Wide screens (`min-width: 64rem`): sticky column on the right; narrow screens: floating button opens `BottomSheet` (slides from the bottom almost to the top, rounded top corners and a grip; the backdrop darkens with the sheet position and closes it on click; closes with swipe down anywhere unless inner content is scrolled)
 - Open sheet has its own path `${BASE_URL}intervals` (pushState), so system "Back" closes it; `rememberURL()` must be called after every history write, so search params stay in sync between the overlay entry and the page entry
 - Any other path on load (including overlay paths after a reload) is replaced with `${BASE_URL}`, keeping search params; on GitHub Pages `404.html` (second build input, `%BASE_URL%` is substituted by Vite) redirects unknown paths to the app
-- `CityPicker`: expands with animation, keyboard: arrows move focus between input and cities, Enter/Space select, Esc closes, Tab out closes; focus returns to the opener
+- `CityPicker`: expands and collapses in `Collapse`, a click on the row of the open picker closes it (its `mousedown` is stopped and prevented, so the outside-click handler and blur don't close it first); keyboard: arrows move focus between input and cities, Enter/Space select, Esc closes, Tab out closes; focus returns to the opener
+- Everything that appears or disappears is animated: `usePresence` (`src/hooks/usePresence.ts`) keeps an element mounted during the exit transition and starts the enter transition before the first paint (forced reflow, no rAF); `Collapse` animates height; `useListPresence` keeps removed list items (intervals, the pending card) until they collapse; `useLastValue` keeps the content of a disappearing element
 - Only one panel instance is mounted at a time (`isDesktop` via `matchMedia`), otherwise `CityPicker` outside-click handlers conflict
 - New interval opens its city picker in the desktop panel; on mobile the sheet opens only if there is no city to use
 

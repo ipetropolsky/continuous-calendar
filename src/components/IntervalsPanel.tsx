@@ -1,8 +1,10 @@
-import { type ReactNode, useEffect, useRef } from 'react';
+import { type MouseEvent, type ReactNode, useEffect, useMemo, useRef } from 'react';
 
 import { ChevronRight, MapPin, Settings, Trash2, X } from 'lucide-react';
 
 import { CityPicker } from '@/components/CityPicker';
+import { Collapse, COLLAPSE_MS } from '@/components/Collapse';
+import { useListPresence } from '@/hooks/usePresence';
 import type { City } from '@/services/weather';
 
 export interface IntervalItem {
@@ -88,6 +90,24 @@ export function PendingIntervalCard({ start, onCancel, className = '', shouldRev
 
 const getDaysCount = (start: Date, end: Date): number => Math.round((end.getTime() - start.getTime()) / DAY_MS) + 1;
 
+// The pending interval is a list item too, so it appears and disappears like intervals
+const PENDING_KEY = 'pending';
+
+type ListItem =
+    | { key: string; interval: IntervalItem; pendingStart?: never }
+    | { key: string; interval?: never; pendingStart: Date };
+
+const getItemKey = (item: ListItem): string => item.key;
+
+// A click on the row of the open city picker closes it. The mousedown must not reach the picker's outside-click
+// handler, and the focus stays in the picker, otherwise the picker would close before the click and open again.
+const keepPickerOnMouseDown = (isPickerOpen: boolean) => (e: MouseEvent) => {
+    if (isPickerOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+};
+
 export function IntervalsPanel({
     intervals,
     pendingStart,
@@ -106,17 +126,74 @@ export function IntervalsPanel({
     settings,
 }: IntervalsPanelProps) {
     // The pending interval is shown where it will be after the end date is chosen
-    const pendingIndex = pendingStart ? intervals.filter((interval) => interval.startDate <= pendingStart).length : -1;
-    const pendingItem = pendingStart && (
-        <li key="pending">
-            <PendingIntervalCard
-                start={pendingStart}
-                onCancel={onCancelPending}
-                shouldReveal
-                className="relative bg-blue-50 ring-1 ring-inset ring-blue-200"
-            />
-        </li>
-    );
+    const listItems = useMemo(() => {
+        const items: ListItem[] = intervals.map((interval) => ({ key: interval.id, interval }));
+        if (pendingStart) {
+            const pendingIndex = intervals.filter((interval) => interval.startDate <= pendingStart).length;
+            items.splice(pendingIndex, 0, { key: PENDING_KEY, pendingStart });
+        }
+        return items;
+    }, [intervals, pendingStart]);
+    const listEntries = useListPresence(listItems, getItemKey, COLLAPSE_MS);
+
+    const toggleCityPicker = (pickerId: string) =>
+        cityPickerIntervalId === pickerId ? onCloseCityPicker() : onOpenCityPicker(pickerId);
+
+    const renderInterval = (interval: IntervalItem) => {
+        const daysCount = getDaysCount(interval.startDate, interval.endDate);
+        const isPickerOpen = interval.id === cityPickerIntervalId;
+        return (
+            <div className="rounded-xl bg-zinc-50">
+                {/* Delete button lies over the right part of the full-width header */}
+                <div className="relative">
+                    <button
+                        className={`group w-full pl-3 pr-14 pt-3 pb-2 text-left rounded-t-xl ${ROW_BUTTON_CLASS}`}
+                        onClick={() => onShow(interval)}
+                    >
+                        <div className="font-serif font-medium text-slate-800 group-hover:text-blue-600 transition-colors">
+                            {formatRange(interval.startDate, interval.endDate)}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                            {daysCount} {daysCount === 1 ? 'day' : 'days'}
+                        </div>
+                    </button>
+                    <button
+                        className={`absolute inset-y-0 right-0 w-12 flex items-center justify-center rounded-tr-xl text-gray-400 hover:text-red-600 hover:bg-red-50 ${FOCUS_CLASS} transition-colors cursor-pointer`}
+                        title="Remove interval"
+                        aria-label="Remove interval"
+                        onClick={() => onRemove(interval.id)}
+                    >
+                        <Trash2 className="w-4 h-4" />
+                    </button>
+                </div>
+
+                <button
+                    className={`group w-full px-3 pt-2 pb-3 flex items-center gap-1 text-left text-sm text-slate-600 ${
+                        isPickerOpen ? '' : 'rounded-b-xl'
+                    } ${ROW_BUTTON_CLASS}`}
+                    aria-expanded={isPickerOpen}
+                    onMouseDown={keepPickerOnMouseDown(isPickerOpen)}
+                    onClick={() => toggleCityPicker(interval.id)}
+                >
+                    <MapPin className="w-4 h-4 flex-shrink-0 group-hover:text-blue-600 transition-colors" />
+                    <span className="truncate group-hover:text-blue-600 transition-colors">
+                        {interval.city?.name ?? 'Choose a city'}
+                    </span>
+                </button>
+
+                <Collapse open={isPickerOpen} appear>
+                    <div className="px-3 pb-3">
+                        <CityPicker
+                            currentCity={interval.city}
+                            recentCities={recentCities}
+                            onSelect={(city) => onCitySelect(interval.id, city)}
+                            onClose={onCloseCityPicker}
+                        />
+                    </div>
+                </Collapse>
+            </div>
+        );
+    };
 
     return (
         <div className="space-y-6 font-sans">
@@ -126,7 +203,8 @@ export function IntervalsPanel({
                     <button
                         className={`group w-full p-3 text-left rounded-xl ${ROW_BUTTON_CLASS}`}
                         aria-expanded={cityPickerIntervalId === DEFAULT_CITY_PICKER_ID}
-                        onClick={() => onOpenCityPicker(DEFAULT_CITY_PICKER_ID)}
+                        onMouseDown={keepPickerOnMouseDown(cityPickerIntervalId === DEFAULT_CITY_PICKER_ID)}
+                        onClick={() => toggleCityPicker(DEFAULT_CITY_PICKER_ID)}
                     >
                         <span className="flex items-center gap-1 text-sm text-slate-600 group-hover:text-blue-600 transition-colors">
                             <MapPin className="w-4 h-4 flex-shrink-0" />
@@ -134,7 +212,7 @@ export function IntervalsPanel({
                         </span>
                         <span className="block mt-1 text-xs text-gray-500">Weather for days outside of intervals</span>
                     </button>
-                    {cityPickerIntervalId === DEFAULT_CITY_PICKER_ID && (
+                    <Collapse open={cityPickerIntervalId === DEFAULT_CITY_PICKER_ID} appear>
                         <div className="px-3 pb-3">
                             <CityPicker
                                 currentCity={defaultCity}
@@ -144,73 +222,36 @@ export function IntervalsPanel({
                                 onClear={() => onDefaultCitySelect(null)}
                             />
                         </div>
-                    )}
+                    </Collapse>
                 </div>
             </section>
 
             <section>
                 <h3 className="mb-2 text-sm font-medium text-gray-700">Intervals</h3>
-                {intervals.length === 0 && !pendingStart ? (
+                <Collapse open={intervals.length === 0 && !pendingStart} appear>
                     <p className="text-sm text-gray-500">Click two dates in the calendar to select an interval.</p>
-                ) : (
-                    <ul className="space-y-2">
-                        {pendingIndex === 0 && pendingItem}
-                        {intervals.map((interval, index) => {
-                            const daysCount = getDaysCount(interval.startDate, interval.endDate);
-                            return [
-                                <li key={interval.id} className="rounded-xl bg-zinc-50">
-                                    {/* Delete button lies over the right part of the full-width header */}
-                                    <div className="relative">
-                                        <button
-                                            className={`group w-full pl-3 pr-14 pt-3 pb-2 text-left rounded-t-xl ${ROW_BUTTON_CLASS}`}
-                                            onClick={() => onShow(interval)}
-                                        >
-                                            <div className="font-serif font-medium text-slate-800 group-hover:text-blue-600 transition-colors">
-                                                {formatRange(interval.startDate, interval.endDate)}
-                                            </div>
-                                            <div className="text-xs text-gray-500">
-                                                {daysCount} {daysCount === 1 ? 'day' : 'days'}
-                                            </div>
-                                        </button>
-                                        <button
-                                            className={`absolute inset-y-0 right-0 w-12 flex items-center justify-center rounded-tr-xl text-gray-400 hover:text-red-600 hover:bg-red-50 ${FOCUS_CLASS} transition-colors cursor-pointer`}
-                                            title="Remove interval"
-                                            aria-label="Remove interval"
-                                            onClick={() => onRemove(interval.id)}
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </button>
-                                    </div>
-
-                                    <button
-                                        className={`group w-full px-3 pt-2 pb-3 flex items-center gap-1 text-left text-sm text-slate-600 ${
-                                            interval.id === cityPickerIntervalId ? '' : 'rounded-b-xl'
-                                        } ${ROW_BUTTON_CLASS}`}
-                                        aria-expanded={interval.id === cityPickerIntervalId}
-                                        onClick={() => onOpenCityPicker(interval.id)}
-                                    >
-                                        <MapPin className="w-4 h-4 flex-shrink-0 group-hover:text-blue-600 transition-colors" />
-                                        <span className="truncate group-hover:text-blue-600 transition-colors">
-                                            {interval.city?.name ?? 'Choose a city'}
-                                        </span>
-                                    </button>
-
-                                    {interval.id === cityPickerIntervalId && (
-                                        <div className="px-3 pb-3">
-                                            <CityPicker
-                                                currentCity={interval.city}
-                                                recentCities={recentCities}
-                                                onSelect={(city) => onCitySelect(interval.id, city)}
-                                                onClose={onCloseCityPicker}
-                                            />
-                                        </div>
+                </Collapse>
+                {/* Gaps are paddings inside the items, so they collapse together with the items */}
+                <ul className="-mb-2">
+                    {listEntries.map(({ key, item, isPresent, isAdded }) => (
+                        <li key={key}>
+                            <Collapse open={isPresent} appear={isAdded}>
+                                <div className="pb-2">
+                                    {item.pendingStart ? (
+                                        <PendingIntervalCard
+                                            start={item.pendingStart}
+                                            onCancel={onCancelPending}
+                                            shouldReveal
+                                            className="relative bg-blue-50 ring-1 ring-inset ring-blue-200"
+                                        />
+                                    ) : (
+                                        renderInterval(item.interval)
                                     )}
-                                </li>,
-                                pendingIndex === index + 1 && pendingItem,
-                            ];
-                        })}
-                    </ul>
-                )}
+                                </div>
+                            </Collapse>
+                        </li>
+                    ))}
+                </ul>
             </section>
 
             <section className="rounded-xl bg-zinc-50">

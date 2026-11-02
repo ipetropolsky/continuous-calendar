@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { CalendarRange, MapPin } from 'lucide-react';
 
@@ -7,6 +7,7 @@ import { type IntervalItem, IntervalsPanel, PendingIntervalCard } from '@/compon
 import { WeatherLayer } from '@/components/weather/WeatherLayer';
 import { getWeatherKind, WEATHER_LABELS, type WeatherKind } from '@/components/weather/weatherPresentation';
 import { calendarConfig, holidayDates, vacationDates } from '@/config/calendarConfig';
+import { useLastValue, usePresence } from '@/hooks/usePresence';
 import {
     addRecentCity,
     canShowTypicalWeather,
@@ -134,6 +135,86 @@ interface CalendarDay {
     isWeekend: boolean;
 }
 
+const holidaySet = new Set(holidayDates);
+const vacationSet = new Set(vacationDates);
+
+// Format date to YYYY-MM-DD string
+const formatDateString = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+// Generate all days, vacations are marked only if they are shown
+const generateCalendarData = (showVacations: boolean): CalendarDay[] => {
+    const days: CalendarDay[] = [];
+    const currentDate = new Date(calendarConfig.startDate);
+    let lastMonth = -1;
+
+    while (currentDate <= calendarConfig.endDate) {
+        const month = currentDate.getMonth();
+        const dateObj = new Date(currentDate);
+        const dateString = formatDateString(dateObj);
+        const dayOfWeek = dateObj.getDay();
+        const isHoliday = holidaySet.has(dateString);
+        // Monday-Friday and not a holiday
+        const isWorkingDay = dayOfWeek >= 1 && dayOfWeek <= 5 && !isHoliday;
+
+        days.push({
+            date: dateObj,
+            day: currentDate.getDate(),
+            month: month,
+            year: currentDate.getFullYear(),
+            isNewMonth: month !== lastMonth,
+            monthName: calendarConfig.monthNames[month],
+            isWorkingDay,
+            isHoliday,
+            isVacation: showVacations && vacationSet.has(dateString) && !isHoliday,
+            isWeekend: !isWorkingDay,
+        });
+
+        lastMonth = month;
+        currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    return days;
+};
+
+// Organize days into weeks starting with Monday
+const organizeIntoWeeks = (days: CalendarDay[]): (CalendarDay | null)[][] => {
+    const weeks: (CalendarDay | null)[][] = [];
+    let currentWeek: (CalendarDay | null)[] = [];
+
+    // Add empty slots for the beginning if the year doesn't start on Monday
+    const firstDay = days[0].date;
+    const firstDayOfWeek = (firstDay.getDay() + 6) % 7; // Convert Sunday=0 to Monday=0
+
+    for (let i = 0; i < firstDayOfWeek; i++) {
+        currentWeek.push(null);
+    }
+
+    days.forEach((day) => {
+        currentWeek.push(day);
+
+        if (currentWeek.length === 7) {
+            weeks.push(currentWeek);
+            currentWeek = [];
+        }
+    });
+
+    // Add the last week if it has days
+    if (currentWeek.length > 0) {
+        // Fill the rest of the week with empty slots
+        while (currentWeek.length < 7) {
+            currentWeek.push(null);
+        }
+        weeks.push(currentWeek);
+    }
+
+    return weeks;
+};
+
 interface DateInterval {
     id: string;
     startDate: Date;
@@ -146,6 +227,211 @@ interface DateStatus {
     isInInterval: boolean;
     intervalId: string | null;
 }
+
+const getToday = (): Date => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), today.getDate());
+};
+
+const FADE_MS = 200;
+
+// Shows hidden earlier weeks, fades out when all weeks are shown
+function PastButton({ show, onClick }: { show: boolean; onClick: () => void }) {
+    const { ref, isMounted, isVisible } = usePresence<HTMLButtonElement>(show, FADE_MS);
+    if (!isMounted) {
+        return null;
+    }
+    return (
+        <button
+            ref={ref}
+            onClick={onClick}
+            className={`absolute -left-1 -top-22 -translate-x-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-700 hover:text-blue-500 transition-[color,background-color,opacity] duration-200 bg-sky-50 hover:bg-sky-100 rounded p-1 z-20 cursor-pointer ${
+                isVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
+        >
+            Past →
+        </button>
+    );
+}
+
+// Number of intervals on the floating button
+function CountBadge({ count }: { count: number }) {
+    const { ref, isMounted, isVisible } = usePresence<HTMLSpanElement>(count > 0, FADE_MS, true);
+    const shownCount = useLastValue(count > 0 ? count : null);
+    if (!isMounted) {
+        return null;
+    }
+    return (
+        <span
+            ref={ref}
+            className={`absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-600 text-xs font-medium flex items-center justify-center transition-[opacity,scale] duration-200 ${
+                isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-50'
+            }`}
+        >
+            {shownCount}
+        </span>
+    );
+}
+
+// Pending interval hint next to the floating button - narrow screens
+function FloatingPendingCard({ start, onCancel }: { start: Date | null; onCancel: () => void }) {
+    const { ref, isMounted, isVisible } = usePresence<HTMLDivElement>(!!start, FADE_MS, true);
+    const shownStart = useLastValue(start);
+    if (!isMounted || !shownStart) {
+        return null;
+    }
+    return (
+        <div
+            ref={ref}
+            className={`fixed bottom-6 left-4 right-24 z-40 transition-[opacity,translate] duration-200 ease-out ${
+                isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
+            }`}
+        >
+            <PendingIntervalCard
+                start={shownStart}
+                onCancel={onCancel}
+                className="relative min-h-14 flex items-center bg-white shadow-lg"
+            />
+        </div>
+    );
+}
+
+interface CityLabelProps {
+    intervalId: string | null;
+    city: City | null;
+    isPickerOpen: boolean;
+    onClick: (intervalId: string) => void;
+}
+
+// City of the interval on its first day, appears and disappears with the interval city
+function CityLabel({ intervalId, city, isPickerOpen, onClick }: CityLabelProps) {
+    const { ref, isMounted, isVisible } = usePresence<HTMLButtonElement>(!!city, FADE_MS, true);
+    const shownCity = useLastValue(city);
+    const shownIntervalId = useLastValue(intervalId);
+    if (!isMounted || !shownCity || !shownIntervalId) {
+        return null;
+    }
+    return (
+        <button
+            ref={ref}
+            className={`absolute z-1 left-[calc(50%-var(--weather-day-size)/2-6px)] bottom-[calc(50%-var(--weather-day-size)/2-4px)] flex items-center gap-0.5 pl-0.5 pr-1.5 py-0.5 rounded-full bg-white shadow-[0_1px_4px_rgb(15_23_42/0.35)] font-sans whitespace-nowrap text-[10px] xl:text-xs leading-none text-slate-700 hover:bg-zinc-100 origin-left transition-[background-color,opacity,scale] duration-200 cursor-pointer ${
+                isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-75 pointer-events-none'
+            }`}
+            title={`${formatCityLabel(shownCity)}: change city`}
+            // A click on the label of the open picker keeps it open, its outside-click handler would close it
+            onMouseDown={(e) => {
+                if (isPickerOpen) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }}
+            onClick={(e) => {
+                e.stopPropagation();
+                onClick(shownIntervalId);
+            }}
+        >
+            <MapPin className="w-3 h-3 xl:w-3.5 xl:h-3.5 flex-shrink-0 text-slate-500" />
+            {shownCity.name}
+        </button>
+    );
+}
+
+interface DayCellProps {
+    day: CalendarDay;
+    isSelectedDay: boolean;
+    isToday: boolean;
+    weatherKind: WeatherKind | null;
+    isTypicalWeather: boolean;
+    weatherTitle: string | undefined;
+    startingIntervalId: string | null; // Interval with a city starting on this day
+    startingCity: City | null;
+    isCityPickerOpen: boolean;
+    onDateClick: (date: Date) => void;
+    onCityLabelClick: (intervalId: string) => void;
+}
+
+// Memoized, so a state change re-renders only the days whose props have changed
+const DayCell = memo(function DayCell({
+    day,
+    isSelectedDay,
+    isToday,
+    weatherKind,
+    isTypicalWeather,
+    weatherTitle,
+    startingIntervalId,
+    startingCity,
+    isCityPickerOpen,
+    onDateClick,
+    onCityLabelClick,
+}: DayCellProps) {
+    // Selected vacations look like selected weekends, unselected vacation weekends stay weekends
+    const isOffDay = day.isHoliday || day.isWeekend;
+
+    // Determine text color based on day type
+    let dayClass = 'text-slate-800';
+    if (isSelectedDay) {
+        dayClass = 'text-zinc-50';
+    } else if (day.isVacation) {
+        dayClass = 'text-orange-600';
+    } else if (isOffDay) {
+        dayClass = 'text-red-600';
+    }
+
+    // Determine background colors based on selection status
+    let bgClass = 'bg-zinc-50 hover:bg-zinc-100';
+    if (isSelectedDay) {
+        if (isOffDay || day.isVacation) {
+            bgClass = 'bg-red-600 hover:bg-red-700';
+        } else {
+            bgClass = 'bg-slate-600 hover:bg-slate-700';
+        }
+    } else if (day.isVacation) {
+        bgClass = 'bg-orange-50 hover:bg-orange-100';
+    } else if (isOffDay) {
+        bgClass = 'bg-rose-50 hover:bg-rose-100';
+    }
+
+    // Check if today - add ring based on day type and selection
+    const todayClass = isToday ? 'outline-2 outline-offset-2 sm:outline-3 sm:outline-offset-3 outline-[#f3adb7]' : '';
+
+    let weatherSurface: 'default' | 'selected-off' | 'vacation' = 'default';
+    if (isSelectedDay && (isOffDay || day.isVacation)) {
+        weatherSurface = 'selected-off';
+    } else if (!isSelectedDay && day.isVacation) {
+        weatherSurface = 'vacation';
+    }
+
+    // The cell has no z-index, so city labels of all days in a week share one stacking context
+    // and a later label covers an earlier one. The size variable is set here to position the label.
+    return (
+        <div
+            className="relative h-12 xs:h-13 sm:h-15 md:h-16 md:w-16 xl:h-20 xl:w-20 flex justify-center align-center items-center [--weather-day-size:40px] xs:[--weather-day-size:48px] sm:[--weather-day-size:52px] md:[--weather-day-size:56px] xl:[--weather-day-size:72px]"
+            data-date={`${day.year}-${day.month}-${day.day}`}
+        >
+            {/* Day cell: weather art under the number */}
+            <div
+                className={`weather-day font-serif ${bgClass} ${dayClass} ${todayClass} ${isTypicalWeather ? '[--weather-opacity:0.6]' : ''} transition-colors cursor-pointer`}
+                title={weatherTitle}
+                onClick={() => onDateClick(day.date)}
+            >
+                {weatherKind && (
+                    <WeatherLayer
+                        kind={weatherKind}
+                        contrast={isSelectedDay ? 'on-dark' : 'on-light'}
+                        surface={weatherSurface}
+                    />
+                )}
+                <span className="weather-day__number">{day.day}</span>
+            </div>
+            <CityLabel
+                intervalId={startingIntervalId}
+                city={startingCity}
+                isPickerOpen={isCityPickerOpen}
+                onClick={onCityLabelClick}
+            />
+        </div>
+    );
+});
 
 export function ContinuousCalendar() {
     const [intervals, setIntervals] = useState<DateInterval[]>([]);
@@ -192,118 +478,10 @@ export function ContinuousCalendar() {
     const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_PANEL_MEDIA).matches);
     const desktopPanelRef = useRef<HTMLDivElement>(null);
 
-    const { startDate, endDate, monthNames, weekDayLabels } = calendarConfig;
+    const { startDate, weekDayLabels } = calendarConfig;
 
-    // Format date to YYYY-MM-DD string
-    const formatDateString = (date: Date): string => {
-        const year = date.getFullYear();
-        const month = (date.getMonth() + 1).toString().padStart(2, '0');
-        const day = date.getDate().toString().padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    };
-
-    // Check if date is today
-    const isToday = (date: Date): boolean => {
-        const today = new Date();
-        return (
-            date.getFullYear() === today.getFullYear() &&
-            date.getMonth() === today.getMonth() &&
-            date.getDate() === today.getDate()
-        );
-    };
-
-    // Check if a date is a holiday
-    const isHoliday = (date: Date): boolean => {
-        const dateString = formatDateString(date);
-        return holidayDates.includes(dateString);
-    };
-
-    // Check if a date is a vacation (only if showVacations is enabled)
-    const isVacation = (date: Date): boolean => {
-        if (!showVacations) {
-            return false;
-        }
-        const dateString = formatDateString(date);
-        return vacationDates.includes(dateString) && !holidayDates.includes(dateString);
-    };
-
-    // Check if a date is a working day (Monday-Friday and not a holiday)
-    const isWorkingDay = (date: Date): boolean => {
-        const dayOfWeek = date.getDay();
-        // Monday = 1, Friday = 5, Saturday = 6, Sunday = 0
-        const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
-        return isWeekday && !isHoliday(date);
-    };
-
-    // Generate all days
-    const generateCalendarData = (): CalendarDay[] => {
-        const days: CalendarDay[] = [];
-
-        const currentDate = new Date(startDate);
-        let lastMonth = -1;
-
-        while (currentDate <= endDate) {
-            const month = currentDate.getMonth();
-            const isNewMonth = month !== lastMonth;
-
-            const dateObj = new Date(currentDate);
-
-            days.push({
-                date: dateObj,
-                day: currentDate.getDate(),
-                month: month,
-                year: currentDate.getFullYear(),
-                isNewMonth,
-                monthName: monthNames[month],
-                isWorkingDay: isWorkingDay(dateObj),
-                isHoliday: isHoliday(dateObj),
-                isVacation: isVacation(dateObj),
-                isWeekend: !isWorkingDay(dateObj),
-            });
-
-            lastMonth = month;
-            currentDate.setDate(currentDate.getDate() + 1);
-        }
-
-        return days;
-    };
-
-    // Organize days into weeks starting with Monday
-    const organizeIntoWeeks = (days: CalendarDay[]): (CalendarDay | null)[][] => {
-        const weeks: (CalendarDay | null)[][] = [];
-        let currentWeek: (CalendarDay | null)[] = [];
-
-        // Add empty slots for the beginning if the year doesn't start on Monday
-        const firstDay = days[0].date;
-        const firstDayOfWeek = (firstDay.getDay() + 6) % 7; // Convert Sunday=0 to Monday=0
-
-        for (let i = 0; i < firstDayOfWeek; i++) {
-            currentWeek.push(null);
-        }
-
-        days.forEach((day) => {
-            currentWeek.push(day);
-
-            if (currentWeek.length === 7) {
-                weeks.push(currentWeek);
-                currentWeek = [];
-            }
-        });
-
-        // Add the last week if it has days
-        if (currentWeek.length > 0) {
-            // Fill the rest of the week with empty slots
-            while (currentWeek.length < 7) {
-                currentWeek.push(null);
-            }
-            weeks.push(currentWeek);
-        }
-
-        return weeks;
-    };
-
-    const days = generateCalendarData();
-    const weeks = organizeIntoWeeks(days);
+    const days = useMemo(() => generateCalendarData(showVacations), [showVacations]);
+    const weeks = useMemo(() => organizeIntoWeeks(days), [days]);
 
     // Week is hidden if all its days are before visibleFrom (week may contain null slots for empty days)
     const shouldHideWeek = (week: (CalendarDay | null)[]): boolean =>
@@ -620,10 +798,7 @@ export function ContinuousCalendar() {
     // Helper function to scroll to a specific date
     const scrollToDate = (date: Date) => {
         const dateString = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-        console.log('Looking for element with data-date:', dateString);
-
         const element = document.querySelector(`[data-date="${dateString}"]`);
-        console.log('Found element:', element);
 
         if (element) {
             const rect = element.getBoundingClientRect();
@@ -631,14 +806,10 @@ export function ContinuousCalendar() {
             const viewportHeight = window.innerHeight;
             const targetPosition = elementTop - viewportHeight / 2 + rect.height / 2;
 
-            console.log('Scrolling to position:', targetPosition);
-
             window.scrollTo({
                 top: Math.max(0, targetPosition),
                 behavior: 'smooth',
             });
-        } else {
-            console.log('Element not found for date:', dateString);
         }
     };
 
@@ -833,9 +1004,18 @@ export function ContinuousCalendar() {
     };
 
     // Intervals for the panel, in calendar order
-    const intervalItems: IntervalItem[] = [...intervals]
-        .sort((a, b) => a.startDate.getTime() - b.startDate.getTime() || a.endDate.getTime() - b.endDate.getTime())
-        .map((interval) => ({ ...interval, city: getIntervalCity(interval) }));
+    const intervalItems: IntervalItem[] = useMemo(
+        () =>
+            [...intervals]
+                .sort(
+                    (a, b) => a.startDate.getTime() - b.startDate.getTime() || a.endDate.getTime() - b.endDate.getTime()
+                )
+                .map((interval) => ({
+                    ...interval,
+                    city: interval.cityId ? (cities[interval.cityId] ?? null) : null,
+                })),
+        [intervals, cities]
+    );
 
     const updateIntervals = (newIntervals: DateInterval[]) => {
         setIntervals(newIntervals);
@@ -893,6 +1073,25 @@ export function ContinuousCalendar() {
         return dateStatus;
     };
 
+    const handleCityLabelClick = (intervalId: string) => {
+        setCityPickerIntervalId(intervalId);
+        if (!isDesktop) {
+            openIntervalsSheet();
+        }
+    };
+
+    // Day cells are memoized, they get stable handlers calling the latest ones
+    const dayHandlersRef = useRef({ handleDateClick, handleCityLabelClick });
+    useLayoutEffect(() => {
+        dayHandlersRef.current = { handleDateClick, handleCityLabelClick };
+    });
+    const onDateClick = useCallback((date: Date) => dayHandlersRef.current.handleDateClick(date), []);
+    const onCityLabelClick = useCallback(
+        (intervalId: string) => dayHandlersRef.current.handleCityLabelClick(intervalId),
+        []
+    );
+    const todayTime = getToday().getTime();
+
     const intervalsPanel = (
         <IntervalsPanel
             intervals={intervalItems}
@@ -948,7 +1147,7 @@ export function ContinuousCalendar() {
         <div className="w-full max-w-7xl mx-auto pt-4 pb-8 md:px-8 md:pt-6 overflow-x-clip">
             <div className="flex gap-8 justify-center px-8 mb-2">
                 <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] xl:w-[560px] ">
-                    <h1 className="text-2xl md:text-4xl xl:text-5xl font-bold font-serif md:text-center">
+                    <h1 className="text-3xl md:text-4xl xl:text-5xl font-bold font-serif text-center">
                         Continuous Calendar
                     </h1>
                 </div>
@@ -979,31 +1178,25 @@ export function ContinuousCalendar() {
                 <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] xl:w-[560px] flex-col relative">
                     {/* Calendar grid */}
                     <div>
-                        {/* Past dates button for mobile */}
-                        {hiddenWeeksCount > 0 && (
-                            <button
-                                onClick={showMorePast}
-                                className="absolute -left-1 -top-22 -translate-x-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-700 hover:text-blue-500 transition-colors bg-sky-50 hover:bg-sky-100 rounded p-1 z-20 cursor-pointer"
-                            >
-                                Past →
-                            </button>
-                        )}
+                        <PastButton show={hiddenWeeksCount > 0} onClick={showMorePast} />
 
                         {weeks.map((week, weekIndex) => {
+                            const isHidden = shouldHideWeek(week);
                             // Check if this week has the first day of a new month
                             const firstDayOfMonth = week.find((day) => day && day.isNewMonth);
 
+                            // Days of hidden weeks are not rendered, they appear with the week
                             return (
                                 <div
                                     key={weekIndex}
                                     className={`relative z-10 transition-[max-height,opacity] duration-500 ease-in-out ${
-                                        shouldHideWeek(week)
+                                        isHidden
                                             ? 'max-h-0 overflow-hidden mb-0 opacity-0'
                                             : 'max-h-[10000px] opacity-100 mb-2 md:mb-0'
                                     }`}
                                 >
                                     {/* Month label for mobile - above first day of month */}
-                                    {firstDayOfMonth && !shouldHideWeek(week) && (
+                                    {firstDayOfMonth && !isHidden && (
                                         <div
                                             onClick={() =>
                                                 handleMonthClick(firstDayOfMonth.year, firstDayOfMonth.monthName)
@@ -1017,106 +1210,45 @@ export function ContinuousCalendar() {
                                         </div>
                                     )}
 
-                                    <div className="grid grid-cols-7 gap-1 mb-2 md:mb-0">
-                                        {week.map((day, dayIndex) => {
-                                            if (!day) {
-                                                return <div key={dayIndex} className="h-12 md:h-16 xl:h-20" />;
-                                            }
-
-                                            const dateStatus = getDateStatus(day.date);
-
-                                            const isSelectedDay = dateStatus.isSelected || dateStatus.isInInterval;
-                                            // Selected vacations look like selected weekends, unselected vacation weekends stay weekends
-                                            const isOffDay = day.isHoliday || day.isWeekend;
-
-                                            // Determine text color based on day type
-                                            let dayClass = 'text-slate-800';
-                                            if (isSelectedDay) {
-                                                dayClass = 'text-zinc-50';
-                                            } else if (day.isVacation) {
-                                                dayClass = 'text-orange-600';
-                                            } else if (isOffDay) {
-                                                dayClass = 'text-red-600';
-                                            }
-
-                                            // Determine background colors based on selection status
-                                            let bgClass = 'bg-zinc-50 hover:bg-zinc-100';
-                                            if (isSelectedDay) {
-                                                if (isOffDay || day.isVacation) {
-                                                    bgClass = 'bg-red-600 hover:bg-red-700';
-                                                } else {
-                                                    bgClass = 'bg-slate-600 hover:bg-slate-700';
+                                    {!isHidden && (
+                                        <div className="grid grid-cols-7 gap-1 mb-2 md:mb-0">
+                                            {week.map((day, dayIndex) => {
+                                                if (!day) {
+                                                    return <div key={dayIndex} className="h-12 md:h-16 xl:h-20" />;
                                                 }
-                                            } else if (day.isVacation) {
-                                                bgClass = 'bg-orange-50 hover:bg-orange-100';
-                                            } else if (isOffDay) {
-                                                bgClass = 'bg-rose-50 hover:bg-rose-100';
-                                            }
 
-                                            // Check if today - add ring based on day type and selection
-                                            const todayClass = isToday(day.date)
-                                                ? 'outline-2 outline-offset-2 sm:outline-3 sm:outline-offset-3 outline-[#f3adb7]'
-                                                : '';
+                                                const dateStatus = getDateStatus(day.date);
+                                                const dayWeather = getDayWeather(day.date);
+                                                // City label on the first day of an interval
+                                                const startingInterval = intervals.find(
+                                                    (interval) => interval.startDate.getTime() === day.date.getTime()
+                                                );
+                                                const startingCity = startingInterval?.cityId
+                                                    ? (cities[startingInterval.cityId] ?? null)
+                                                    : null;
 
-                                            const dayWeather = getDayWeather(day.date);
-                                            let weatherSurface: 'default' | 'selected-off' | 'vacation' = 'default';
-                                            if (isSelectedDay && (isOffDay || day.isVacation)) {
-                                                weatherSurface = 'selected-off';
-                                            } else if (!isSelectedDay && day.isVacation) {
-                                                weatherSurface = 'vacation';
-                                            }
-
-                                            // City label on the first day of an interval
-                                            const startingInterval = intervals.find(
-                                                (interval) => interval.startDate.getTime() === day.date.getTime()
-                                            );
-                                            const startingCity = startingInterval?.cityId
-                                                ? cities[startingInterval.cityId]
-                                                : undefined;
-
-                                            // The cell has no z-index, so city labels of all days in a week share one stacking context
-                                            // and a later label covers an earlier one. The size variable is set here to position the label.
-                                            return (
-                                                <div
-                                                    key={`${day.year}-${day.month}-${day.day}`}
-                                                    className="relative h-12 xs:h-13 sm:h-15 md:h-16 md:w-16 xl:h-20 xl:w-20 flex justify-center align-center items-center [--weather-day-size:40px] xs:[--weather-day-size:48px] sm:[--weather-day-size:52px] md:[--weather-day-size:56px] xl:[--weather-day-size:72px]"
-                                                    data-date={`${day.year}-${day.month}-${day.day}`}
-                                                >
-                                                    {/* Day cell: weather art under the number */}
-                                                    <div
-                                                        className={`weather-day font-serif ${bgClass} ${dayClass} ${todayClass} ${dayWeather?.isTypical ? '[--weather-opacity:0.6]' : ''} transition-colors cursor-pointer`}
-                                                        title={dayWeather?.title}
-                                                        onClick={() => handleDateClick(day.date)}
-                                                    >
-                                                        {dayWeather && (
-                                                            <WeatherLayer
-                                                                kind={dayWeather.kind}
-                                                                contrast={isSelectedDay ? 'on-dark' : 'on-light'}
-                                                                surface={weatherSurface}
-                                                            />
-                                                        )}
-                                                        <span className="weather-day__number">{day.day}</span>
-                                                    </div>
-                                                    {startingInterval && startingCity && (
-                                                        <button
-                                                            className="absolute z-1 left-[calc(50%-var(--weather-day-size)/2-6px)] bottom-[calc(50%-var(--weather-day-size)/2-4px)] flex items-center gap-0.5 pl-0.5 pr-1.5 py-0.5 rounded-full bg-white shadow-[0_1px_4px_rgb(15_23_42/0.35)] font-sans whitespace-nowrap text-[10px] xl:text-xs leading-none text-slate-700 hover:bg-zinc-100 transition-colors cursor-pointer"
-                                                            title={`${formatCityLabel(startingCity)}: change city`}
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setCityPickerIntervalId(startingInterval.id);
-                                                                if (!isDesktop) {
-                                                                    openIntervalsSheet();
-                                                                }
-                                                            }}
-                                                        >
-                                                            <MapPin className="w-3 h-3 xl:w-3.5 xl:h-3.5 flex-shrink-0 text-slate-500" />
-                                                            {startingCity.name}
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
+                                                return (
+                                                    <DayCell
+                                                        key={`${day.year}-${day.month}-${day.day}`}
+                                                        day={day}
+                                                        isSelectedDay={dateStatus.isSelected || dateStatus.isInInterval}
+                                                        isToday={day.date.getTime() === todayTime}
+                                                        weatherKind={dayWeather?.kind ?? null}
+                                                        isTypicalWeather={!!dayWeather?.isTypical}
+                                                        weatherTitle={dayWeather?.title}
+                                                        startingIntervalId={startingCity ? startingInterval!.id : null}
+                                                        startingCity={startingCity}
+                                                        isCityPickerOpen={
+                                                            !!startingInterval &&
+                                                            startingInterval.id === cityPickerIntervalId
+                                                        }
+                                                        onDateClick={onDateClick}
+                                                        onCityLabelClick={onCityLabelClick}
+                                                    />
+                                                );
+                                            })}
+                                        </div>
+                                    )}
                                 </div>
                             );
                         })}
@@ -1134,8 +1266,9 @@ export function ContinuousCalendar() {
                 </aside>
             </div>
 
-            {/* Floating button with intervals sheet - narrow screens */}
-            {!isDesktop && !showIntervalsSheet && (
+            {/* Floating button with intervals sheet and pending interval hint next to it - narrow screens.
+                They stay under the open sheet, so they don't disappear before the sheet covers them. */}
+            {!isDesktop && (
                 <button
                     className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-slate-800 text-white shadow-lg flex items-center justify-center hover:bg-slate-700 transition-colors cursor-pointer"
                     title="Intervals and weather"
@@ -1143,22 +1276,10 @@ export function ContinuousCalendar() {
                     onClick={openIntervalsSheet}
                 >
                     <CalendarRange className="w-6 h-6" />
-                    {intervals.length > 0 && (
-                        <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-600 text-xs font-medium flex items-center justify-center">
-                            {intervals.length}
-                        </span>
-                    )}
+                    <CountBadge count={intervals.length} />
                 </button>
             )}
-
-            {/* Pending interval hint next to the floating button - narrow screens */}
-            {!isDesktop && !showIntervalsSheet && selectedStart && (
-                <PendingIntervalCard
-                    start={selectedStart}
-                    onCancel={() => setSelectedStart(null)}
-                    className="fixed bottom-6 left-4 right-24 z-40 min-h-14 flex items-center bg-white shadow-lg"
-                />
-            )}
+            {!isDesktop && <FloatingPendingCard start={selectedStart} onCancel={() => setSelectedStart(null)} />}
 
             {!isDesktop && (
                 <BottomSheet open={showIntervalsSheet} title="Weather & intervals" onClose={closeIntervalsSheet}>
