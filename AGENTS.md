@@ -58,7 +58,8 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 
 ### Calendar Data Generation
 
-- Generates days from Jan 1, 2025 to Dec 31, 2026
+- Generates days from Jan 1, 2025 to Dec 31, 2027 (`calendarConfig`)
+- Visible range starts at `visibleFrom`: Monday 2 weeks before today, or earlier if intervals/month from the URL need it. Earlier weeks are hidden, each "Past" click shows 3 more months. Weather is loaded only for visible days
 - Organizes into weeks starting with Monday
 - Holiday/vacation dates hardcoded in arrays (YYYY-MM-DD format)
 - Day classification: working days, weekends, holidays, vacations
@@ -70,7 +71,8 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 
 ### Weather
 
-- Open-Meteo API (no key) in `src/services/weather.ts`: city search/lookup, daily weather (forecast for the last week and up to 16 days ahead, archive for older dates — forecast API has gaps in the past). Beyond the forecast horizon days show typical weather calculated from the last 5 full years of the archive (±3 days window), rendered semi-transparent
+- Open-Meteo API (no key) in `src/services/weather.ts`: city search/lookup, daily weather (forecast for the last week and up to 16 days ahead, archive for older dates — forecast API has gaps in the past). Beyond the forecast horizon days show typical weather calculated from the last 5 full years of the archive (±3 days window), rendered semi-transparent; typical weather is also shown from the last week on until the forecast is loaded
+- Weather cache: `src/services/weatherStorage.ts` (async interface over localStorage, `weather:v1:*` keys), used only by `weather.ts`; the app doesn't know about it. Archive days and typical weather are stored forever (typical until the 5-year window changes), archive requests skip stored days and days already being requested. Forecast is stored with its request time and requested again if older than 12 hours; the app re-requests weather on tab activation (`visibilitychange`)
 - Each interval has its own city, shown as a label with a pin in the bottom-left corner of its first day (not truncated, continues to the right, a later label covers an earlier one; click opens the city picker). A day shows the weather of the interval that starts later (ends later if both start on the same day); days without interval weather show the default city weather (whole calendar range)
 - Weather art is drawn inside the day circle under the number by `src/components/weather/WeatherLayer.tsx` (from weather-svg-kit v8): WMO code → `WeatherKind` in `weatherPresentation.ts`, trusted inline SVG geometry in `weatherScenes.ts`, opacity via CSS variables in `weather-opacity.css`
 - Day circle uses `.weather-day` sized by `--weather-day-size` (40/48/52/56/72px, xl cells are 80px), number size is `53cqi`; today is marked with a pink outline as in the kit preview; don't add width/height/text-size classes to it

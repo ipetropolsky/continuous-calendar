@@ -1,5 +1,7 @@
 // Weather and geocoding are provided by Open-Meteo (https://open-meteo.com), no API key required
 
+import { readWeatherCache, writeWeatherCache } from '@/services/weatherStorage';
+
 export interface City {
     id: number;
     name: string;
@@ -26,6 +28,9 @@ const ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive';
 // so older dates are taken from the archive which lags only a few days
 const FORECAST_PAST_DAYS = 7;
 const FORECAST_FUTURE_DAYS = 15;
+
+// Forecast is requested again when the stored one is older than this
+const FORECAST_TTL = 12 * 60 * 60 * 1000;
 
 // Typical weather is calculated from the archive of past years, each day uses ± a few neighbouring days
 const CLIMATE_YEARS = 5;
@@ -84,14 +89,14 @@ export const getCityById = async (id: number): Promise<City | null> => {
     return toCity(await response.json());
 };
 
-const fetchDaily = async (url: string, city: City, start: Date, end: Date): Promise<WeatherByDate> => {
+const fetchDaily = async (url: string, city: City, start: string, end: string): Promise<WeatherByDate> => {
     const params = new URLSearchParams({
         latitude: city.latitude.toString(),
         longitude: city.longitude.toString(),
         daily: 'weather_code,temperature_2m_max,temperature_2m_min',
         timezone: 'auto',
-        start_date: formatDate(start),
-        end_date: formatDate(end),
+        start_date: start,
+        end_date: end,
     });
     const response = await fetch(`${url}?${params}`);
     if (!response.ok) {
@@ -121,61 +126,195 @@ const fetchDaily = async (url: string, city: City, start: Date, end: Date): Prom
     return result;
 };
 
-const weatherCache = new Map<string, Promise<WeatherByDate>>();
-
-// Daily weather for a date range: archive for the old past, forecast for the recent past and the next 16 days.
-// Dates beyond the forecast horizon are skipped.
-export const fetchDailyWeather = (city: City, start: Date, end: Date): Promise<WeatherByDate> => {
-    const cacheKey = `${city.id}:${formatDate(start)}:${formatDate(end)}`;
-    const cached = weatherCache.get(cacheKey);
-    if (cached) {
-        return cached;
-    }
-
+const getToday = (): Date => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const forecastStart = addDays(today, -FORECAST_PAST_DAYS);
-    const forecastEnd = addDays(today, FORECAST_FUTURE_DAYS);
+    return today;
+};
 
+const getForecastRange = (): { start: Date; end: Date } => {
+    const today = getToday();
+    return { start: addDays(today, -FORECAST_PAST_DAYS), end: addDays(today, FORECAST_FUTURE_DAYS) };
+};
+
+const getDates = (start: Date, end: Date): string[] => {
+    const dates: string[] = [];
+    for (let date = new Date(start); date <= end; date = addDays(date, 1)) {
+        dates.push(formatDate(date));
+    }
+    return dates;
+};
+
+// Archive of past days is final, so it is stored forever. Days without data are stored as null
+// to avoid requesting them again.
+interface Archive {
+    days: Record<string, DayWeather | null>;
+    pending: Map<string, Promise<void>>; // Requests in flight by date
+}
+
+const archives = new Map<number, Promise<Archive>>();
+
+const loadArchive = (cityId: number): Promise<Archive> => {
+    let archive = archives.get(cityId);
+    if (!archive) {
+        archive = readWeatherCache<Archive['days']>(`archive:${cityId}`).then((days) => ({
+            days: days ?? {},
+            pending: new Map(),
+        }));
+        archives.set(cityId, archive);
+    }
+    return archive;
+};
+
+// Requests only days that are neither stored nor being requested, so overlapping calls share requests
+const fetchArchiveWeather = async (city: City, start: Date, end: Date): Promise<WeatherByDate> => {
+    const archive = await loadArchive(city.id);
+    const dates = getDates(start, end);
+    const requests = new Set<Promise<void>>();
+
+    // Consecutive missing days are requested together
+    const missingRuns: string[][] = [];
+    let missingRun: string[] | null = null;
+    for (const date of dates) {
+        const pending = archive.pending.get(date);
+        if (pending || date in archive.days) {
+            if (pending) {
+                requests.add(pending);
+            }
+            missingRun = null;
+            continue;
+        }
+        if (!missingRun) {
+            missingRun = [];
+            missingRuns.push(missingRun);
+        }
+        missingRun.push(date);
+    }
+
+    missingRuns.forEach((runDates) => {
+        const request = fetchDaily(ARCHIVE_URL, city, runDates[0], runDates[runDates.length - 1])
+            .then((weatherByDate) => {
+                runDates.forEach((date) => {
+                    archive.days[date] = weatherByDate[date] ?? null;
+                });
+                void writeWeatherCache(`archive:${city.id}`, archive.days);
+            })
+            .finally(() => runDates.forEach((date) => archive.pending.delete(date)));
+        runDates.forEach((date) => archive.pending.set(date, request));
+        requests.add(request);
+    });
+
+    const results = await Promise.allSettled(requests);
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure) {
+        throw failure.reason;
+    }
+    const result: WeatherByDate = {};
+    dates.forEach((date) => {
+        const dayWeather = archive.days[date];
+        if (dayWeather) {
+            result[date] = dayWeather;
+        }
+    });
+    return result;
+};
+
+// Forecast for the last week and 16 days ahead, requested again when it is older than FORECAST_TTL
+interface ForecastRequest {
+    start: string;
+    fetchedAt: number;
+    promise: Promise<WeatherByDate>;
+}
+
+const forecasts = new Map<number, ForecastRequest>();
+
+const fetchForecastWeather = (city: City): Promise<WeatherByDate> => {
+    const { start, end } = getForecastRange();
+    const startDate = formatDate(start);
+    const current = forecasts.get(city.id);
+    if (current && current.start === startDate && Date.now() - current.fetchedAt < FORECAST_TTL) {
+        return current.promise;
+    }
+
+    const request: ForecastRequest = { start: startDate, fetchedAt: Date.now(), promise: Promise.resolve({}) };
+    request.promise = (async () => {
+        const stored = await readWeatherCache<Omit<ForecastRequest, 'promise'> & { days: WeatherByDate }>(
+            `forecast:${city.id}`
+        );
+        if (stored && stored.start === startDate && request.fetchedAt - stored.fetchedAt < FORECAST_TTL) {
+            request.fetchedAt = stored.fetchedAt;
+            return stored.days;
+        }
+        const days = await fetchDaily(FORECAST_URL, city, startDate, formatDate(end));
+        void writeWeatherCache(`forecast:${city.id}`, { start: startDate, fetchedAt: request.fetchedAt, days });
+        return days;
+    })();
+    // Allow retry on failure
+    request.promise.catch(() => {
+        if (forecasts.get(city.id) === request) {
+            forecasts.delete(city.id);
+        }
+    });
+    forecasts.set(city.id, request);
+    return request.promise;
+};
+
+// Daily weather for a date range: archive for the old past, forecast for the last week and the next 16 days.
+// Dates beyond the forecast horizon are skipped. Each part is passed to onLoad as soon as it is loaded,
+// the promise is rejected if any part failed.
+export const loadDailyWeather = async (
+    city: City,
+    start: Date,
+    end: Date,
+    onLoad: (weatherByDate: WeatherByDate) => void
+): Promise<void> => {
+    const { start: forecastStart, end: forecastEnd } = getForecastRange();
     const requests: Promise<WeatherByDate>[] = [];
+
     if (start < forecastStart) {
-        const archiveEnd = end < forecastStart ? end : addDays(forecastStart, -1);
-        requests.push(fetchDaily(ARCHIVE_URL, city, start, archiveEnd));
+        requests.push(fetchArchiveWeather(city, start, end < forecastStart ? end : addDays(forecastStart, -1)));
     }
     if (end >= forecastStart && start <= forecastEnd) {
+        const from = formatDate(start > forecastStart ? start : forecastStart);
+        const to = formatDate(end < forecastEnd ? end : forecastEnd);
         requests.push(
-            fetchDaily(
-                FORECAST_URL,
-                city,
-                start > forecastStart ? start : forecastStart,
-                end < forecastEnd ? end : forecastEnd
+            fetchForecastWeather(city).then((days) =>
+                Object.fromEntries(Object.entries(days).filter(([date]) => date >= from && date <= to))
             )
         );
     }
 
-    const promise = Promise.all(requests).then((results) => Object.assign({}, ...results) as WeatherByDate);
-    // Allow retry on failure
-    promise.catch(() => weatherCache.delete(cacheKey));
-    weatherCache.set(cacheKey, promise);
-    return promise;
+    const results = await Promise.allSettled(
+        requests.map((request) =>
+            request.then((weatherByDate) => {
+                if (Object.keys(weatherByDate).length > 0) {
+                    onLoad(weatherByDate);
+                }
+            })
+        )
+    );
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure) {
+        throw failure.reason;
+    }
 };
 
 // Past weather from the given date and forecast up to the forecast horizon
-export const fetchWeatherUntilHorizon = (city: City, start: Date): Promise<WeatherByDate> => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return fetchDailyWeather(city, start, addDays(today, FORECAST_FUTURE_DAYS));
-};
+export const loadWeatherUntilHorizon = (
+    city: City,
+    start: Date,
+    onLoad: (weatherByDate: WeatherByDate) => void
+): Promise<void> => loadDailyWeather(city, start, getForecastRange().end, onLoad);
 
-export const isBeyondForecast = (date: Date): boolean => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return date > addDays(today, FORECAST_FUTURE_DAYS);
-};
+// Typical weather is shown beyond the forecast horizon and until the forecast is loaded
+export const canShowTypicalWeather = (date: Date): boolean => date >= getForecastRange().start;
 
 export type TypicalWeather = Record<string, DayWeather>; // Keyed by MM-DD
 
 const average = (values: number[]): number => values.reduce((sum, value) => sum + value, 0) / values.length;
+
+// Averaged temperatures are rounded to keep stored data small
+const roundTemperature = (value: number): number => Math.round(value * 10) / 10;
 
 const median = (values: number[]): number => {
     const sorted = [...values].sort((a, b) => a - b);
@@ -212,26 +351,18 @@ const getTypicalCode = (samples: ClimateSample[]): number => {
     return 0;
 };
 
-const climateCache = new Map<number, Promise<TypicalWeather>>();
-
-// Typical weather for every day of the year based on the last full years of the archive
-export const fetchTypicalWeather = (city: City): Promise<TypicalWeather> => {
-    const cached = climateCache.get(city.id);
-    if (cached) {
-        return cached;
-    }
-
-    const lastYear = new Date().getFullYear() - 1;
+// Typical weather for every day of the year calculated from the archive of the given years
+const requestTypicalWeather = (city: City, firstYear: number, lastYear: number): Promise<TypicalWeather> => {
     const params = new URLSearchParams({
         latitude: city.latitude.toString(),
         longitude: city.longitude.toString(),
         daily: 'precipitation_sum,snowfall_sum,cloud_cover_mean,temperature_2m_max,temperature_2m_min',
         timezone: 'auto',
-        start_date: `${lastYear - CLIMATE_YEARS + 1}-01-01`,
+        start_date: `${firstYear}-01-01`,
         end_date: `${lastYear}-12-31`,
     });
 
-    const promise = fetch(`${ARCHIVE_URL}?${params}`)
+    return fetch(`${ARCHIVE_URL}?${params}`)
         .then((response) => {
             if (!response.ok) {
                 throw new Error(`Climate request failed: ${response.status}`);
@@ -281,17 +412,40 @@ export const fetchTypicalWeather = (city: City): Promise<TypicalWeather> => {
                 samplesByDay.forEach((samples, key) => {
                     result[key] = {
                         code: getTypicalCode(samples),
-                        tMax: average(samples.map(({ tMax }) => tMax)),
-                        tMin: average(samples.map(({ tMin }) => tMin)),
+                        tMax: roundTemperature(average(samples.map(({ tMax }) => tMax))),
+                        tMin: roundTemperature(average(samples.map(({ tMin }) => tMin))),
                         isTypical: true,
                     };
                 });
                 return result;
             }
         );
+};
+
+const typicalWeatherRequests = new Map<number, Promise<TypicalWeather>>();
+
+// Typical weather based on the last full years of the archive, stored until a new year adds data
+export const fetchTypicalWeather = (city: City): Promise<TypicalWeather> => {
+    const current = typicalWeatherRequests.get(city.id);
+    if (current) {
+        return current;
+    }
+
+    const lastYear = new Date().getFullYear() - 1;
+    const firstYear = lastYear - CLIMATE_YEARS + 1;
+    const years = `${firstYear}-${lastYear}`;
+    const promise = (async () => {
+        const stored = await readWeatherCache<{ years: string; days: TypicalWeather }>(`typical:${city.id}`);
+        if (stored?.years === years) {
+            return stored.days;
+        }
+        const days = await requestTypicalWeather(city, firstYear, lastYear);
+        void writeWeatherCache(`typical:${city.id}`, { years, days });
+        return days;
+    })();
     // Allow retry on failure
-    promise.catch(() => climateCache.delete(city.id));
-    climateCache.set(city.id, promise);
+    promise.catch(() => typicalWeatherRequests.delete(city.id));
+    typicalWeatherRequests.set(city.id, promise);
     return promise;
 };
 

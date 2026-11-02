@@ -9,20 +9,36 @@ import { getWeatherKind, WEATHER_LABELS, type WeatherKind } from '@/components/w
 import { calendarConfig, holidayDates, vacationDates } from '@/config/calendarConfig';
 import {
     addRecentCity,
+    canShowTypicalWeather,
     type City,
-    fetchDailyWeather,
     fetchTypicalWeather,
-    fetchWeatherUntilHorizon,
     formatCityLabel,
     getCityById,
-    isBeyondForecast,
+    loadDailyWeather,
     loadDefaultCity,
     loadRecentCities,
+    loadWeatherUntilHorizon,
     saveDefaultCity,
     saveRecentCities,
     type TypicalWeather,
     type WeatherByDate,
 } from '@/services/weather';
+
+// By default the calendar starts this many weeks before today, each "Past" click shows more months
+const PAST_WEEKS = 2;
+const PAST_STEP_MONTHS = 3;
+
+// Monday of the week with the date
+const getWeekStart = (date: Date): Date => {
+    const weekStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+    return weekStart;
+};
+
+const getDefaultVisibleFrom = (): Date => {
+    const today = new Date();
+    return getWeekStart(new Date(today.getFullYear(), today.getMonth(), today.getDate() - PAST_WEEKS * 7));
+};
 
 // Intervals panel is shown on the right on wide screens, a floating button opens it as a sheet otherwise
 const DESKTOP_PANEL_MEDIA = '(min-width: 64rem)';
@@ -117,7 +133,10 @@ export function ContinuousCalendar() {
     const [showSettings, setShowSettings] = useState(false);
     const [settingsVisible, setSettingsVisible] = useState(false);
     const [showVacations, setShowVacations] = useState(false);
-    const [showPastDates, setShowPastDates] = useState(false);
+    // Earlier weeks are hidden behind the "Past" button, their weather is not loaded
+    const [visibleFrom, setVisibleFrom] = useState(getDefaultVisibleFrom);
+    // Incremented when the tab becomes active to refresh an outdated forecast
+    const [weatherRefreshKey, setWeatherRefreshKey] = useState(0);
     const [shouldScrollToToday, setShouldScrollToToday] = useState(false);
     const [recentCities, setRecentCities] = useState<City[]>(loadRecentCities);
     const [defaultCity, setDefaultCity] = useState<City | null>(loadDefaultCity);
@@ -153,7 +172,7 @@ export function ContinuousCalendar() {
     }, []);
     const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_PANEL_MEDIA).matches);
 
-    const { firstVisibleDate, startDate, endDate, monthNames, weekDayLabels } = calendarConfig;
+    const { startDate, endDate, monthNames, weekDayLabels } = calendarConfig;
 
     // Format date to YYYY-MM-DD string
     const formatDateString = (date: Date): string => {
@@ -161,11 +180,6 @@ export function ContinuousCalendar() {
         const month = (date.getMonth() + 1).toString().padStart(2, '0');
         const day = date.getDate().toString().padStart(2, '0');
         return `${year}-${month}-${day}`;
-    };
-
-    // Check if date is before firstVisibleDate
-    const isDateBeforeFirstVisible = (date: Date): boolean => {
-        return date < firstVisibleDate;
     };
 
     // Check if date is today
@@ -271,19 +285,18 @@ export function ContinuousCalendar() {
     const days = generateCalendarData();
     const weeks = organizeIntoWeeks(days);
 
-    // Check if a week should be hidden (all days before firstVisibleDate)
-    const shouldHideWeek = (week: (CalendarDay | null)[]): boolean => {
-        if (showPastDates) {
-            return false;
-        }
-        // Check if all days in week are before firstVisibleDate
-        // Note: week may contain null slots for empty days
-        for (const day of week) {
-            if (day && !isDateBeforeFirstVisible(day.date)) {
-                return false; // At least one day is on or after firstVisibleDate
-            }
-        }
-        return true;
+    // Week is hidden if all its days are before visibleFrom (week may contain null slots for empty days)
+    const shouldHideWeek = (week: (CalendarDay | null)[]): boolean =>
+        week.every((day) => !day || day.date < visibleFrom);
+
+    // Show PAST_STEP_MONTHS more months before the visible ones
+    const showMorePast = () => {
+        setVisibleFrom((prev) => {
+            const earlier = getWeekStart(
+                new Date(prev.getFullYear(), prev.getMonth() - PAST_STEP_MONTHS, prev.getDate())
+            );
+            return earlier < startDate ? startDate : earlier;
+        });
     };
 
     // URL encoding/decoding functions
@@ -368,30 +381,22 @@ export function ContinuousCalendar() {
             setShowVacations(true);
         }
 
-        // Determine if past dates should be initially visible
-        // (if we need to scroll to a date before firstVisibleDate)
-        let shouldShowPastDatesInitially = false;
-
-        if (parsedIntervals.length > 0) {
-            // Sort intervals by start date to find the earliest
-            const sortedIntervals = [...parsedIntervals].sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
-            const earliestInterval = sortedIntervals[0];
-            if (isDateBeforeFirstVisible(earliestInterval.startDate)) {
-                shouldShowPastDatesInitially = true;
+        // Show earlier weeks if intervals or the month from the URL start before them
+        let earliestDate = getDefaultVisibleFrom();
+        parsedIntervals.forEach((interval) => {
+            if (interval.startDate < earliestDate) {
+                earliestDate = interval.startDate;
+            }
+        });
+        const monthData = monthParam ? parseMonthFromString(monthParam) : null;
+        if (monthData) {
+            const firstDayOfMonth = new Date(monthData.year, monthData.month, 1);
+            if (firstDayOfMonth < earliestDate) {
+                earliestDate = firstDayOfMonth;
             }
         }
-
-        if (monthParam) {
-            const monthData = parseMonthFromString(monthParam);
-            if (monthData) {
-                const firstDayOfMonth = new Date(monthData.year, monthData.month, 1);
-                if (isDateBeforeFirstVisible(firstDayOfMonth)) {
-                    shouldShowPastDatesInitially = true;
-                }
-            }
-        }
-
-        setShowPastDates(shouldShowPastDatesInitially);
+        const earliestWeekStart = getWeekStart(earliestDate);
+        setVisibleFrom(earliestWeekStart < startDate ? startDate : earliestWeekStart);
 
         // Set scroll to today if no intervals or month param
         if (parsedIntervals.length === 0 && !monthParam) {
@@ -421,23 +426,34 @@ export function ContinuousCalendar() {
         });
     };
 
-    // Load weather for intervals with known cities
+    const addCityWeather = useCallback((cityId: number, weatherByDate: WeatherByDate) => {
+        setWeather((prev) => ({ ...prev, [cityId]: { ...prev[cityId], ...weatherByDate } }));
+    }, []);
+
+    // Refresh weather when the tab becomes active, outdated forecast is requested again
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                setWeatherRefreshKey((prev) => prev + 1);
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, []);
+
+    // Load weather for visible days of intervals with known cities
     useEffect(() => {
         intervals.forEach((interval) => {
             const city = interval.cityId ? cities[interval.cityId] : null;
-            if (!city) {
+            if (!city || interval.endDate < visibleFrom) {
                 return;
             }
-            fetchDailyWeather(city, interval.startDate, interval.endDate)
-                .then((weatherByDate) => {
-                    if (Object.keys(weatherByDate).length === 0) {
-                        return;
-                    }
-                    setWeather((prev) => ({ ...prev, [city.id]: { ...prev[city.id], ...weatherByDate } }));
-                })
-                .catch((error) => console.error('Failed to load weather:', error));
+            const start = interval.startDate < visibleFrom ? visibleFrom : interval.startDate;
+            loadDailyWeather(city, start, interval.endDate, (weatherByDate) =>
+                addCityWeather(city.id, weatherByDate)
+            ).catch((error) => console.error('Failed to load weather:', error));
         });
-    }, [intervals, cities]);
+    }, [intervals, cities, visibleFrom, weatherRefreshKey, addCityWeather]);
 
     // Load typical weather for interval cities and the default city
     useEffect(() => {
@@ -505,17 +521,15 @@ export function ContinuousCalendar() {
         return () => document.removeEventListener('keydown', handleKeyDown);
     });
 
-    // Load forecast for the default city
+    // Load weather of visible days for the default city
     useEffect(() => {
         if (!defaultCity) {
             return;
         }
-        fetchWeatherUntilHorizon(defaultCity, startDate)
-            .then((weatherByDate) =>
-                setWeather((prev) => ({ ...prev, [defaultCity.id]: { ...prev[defaultCity.id], ...weatherByDate } }))
-            )
-            .catch((error) => console.error('Failed to load weather:', error));
-    }, [defaultCity, startDate]);
+        loadWeatherUntilHorizon(defaultCity, visibleFrom, (weatherByDate) =>
+            addCityWeather(defaultCity.id, weatherByDate)
+        ).catch((error) => console.error('Failed to load weather:', error));
+    }, [defaultCity, visibleFrom, weatherRefreshKey, addCityWeather]);
 
     // Scroll to selected month, to the first interval, or to today
     useEffect(() => {
@@ -718,7 +732,7 @@ export function ContinuousCalendar() {
 
     // Weather of the day is taken from the interval that starts later (or ends later if both start on the same day),
     // days without interval weather show the default city weather.
-    // Beyond the forecast horizon typical weather by past years statistics is used.
+    // Beyond the forecast horizon and until the forecast is loaded typical weather by past years statistics is used.
     const getDayWeather = (date: Date): { kind: WeatherKind; isTypical: boolean; title: string } | null => {
         let displayInterval: DateInterval | undefined;
         for (const interval of intervals) {
@@ -736,7 +750,7 @@ export function ContinuousCalendar() {
         }
 
         const dateString = formatDateString(date);
-        const canBeTypical = isBeyondForecast(date);
+        const canBeTypical = canShowTypicalWeather(date);
         const getCityWeather = (city: City | null) =>
             city
                 ? (weather[city.id]?.[dateString] ??
@@ -954,9 +968,9 @@ export function ContinuousCalendar() {
                     {/* Calendar grid */}
                     <div>
                         {/* Past dates button for mobile */}
-                        {hiddenWeeksCount > 0 && !showPastDates && (
+                        {hiddenWeeksCount > 0 && (
                             <button
-                                onClick={() => setShowPastDates(true)}
+                                onClick={showMorePast}
                                 className="absolute -left-1 -top-22 -translate-x-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-700 hover:text-blue-500 transition-colors bg-sky-50 hover:bg-sky-100 rounded p-1 z-20"
                             >
                                 Past →

@@ -102,9 +102,6 @@ export const vacationDates: string[] = [
 ];
 
 export const calendarConfig = {
-    // First date that is visible by default (past dates are hidden)
-    firstVisibleDate: new Date(2026, 0, 1), // Jan 1, 2026
-
     // Calendar date range
     startDate: new Date(2025, 0, 1), // Jan 1, 2025
     endDate: new Date(2027, 11, 31), // Dec 31, 2027
