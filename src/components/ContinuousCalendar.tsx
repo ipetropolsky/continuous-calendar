@@ -4,7 +4,7 @@ import { CalendarRange, MapPin } from 'lucide-react';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { type IntervalItem, IntervalsPanel, PendingIntervalCard } from '@/components/IntervalsPanel';
-import { WeatherLayer } from '@/components/weather/WeatherLayer';
+import { WeatherLayer, WeatherSymbols } from '@/components/weather/WeatherLayer';
 import { getWeatherKind, WEATHER_LABELS, type WeatherKind } from '@/components/weather/weatherPresentation';
 import { calendarConfig, holidayDates, vacationDates } from '@/config/calendarConfig';
 import { useLastValue, usePresence } from '@/hooks/usePresence';
@@ -1145,6 +1145,7 @@ export function ContinuousCalendar() {
 
     return (
         <div className="w-full max-w-7xl mx-auto pt-4 pb-8 md:px-8 md:pt-6 overflow-x-clip">
+            <WeatherSymbols />
             <div className="flex gap-8 justify-center px-8 mb-2">
                 <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] xl:w-[560px] ">
                     <h1 className="text-3xl md:text-4xl xl:text-5xl font-bold font-serif text-center">

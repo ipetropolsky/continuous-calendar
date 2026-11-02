@@ -4,3 +4,4 @@ build
 .CLAUDE.local.md
 .local
 .claude
+.playwright-mcp

@@ -49,6 +49,6 @@ export default tseslint.config(
         },
     },
     {
-        ignores: ['build/**', 'dist/**', 'tools/**', '**/*.cjs', 'package-lock.json'],
+        ignores: ['build/**', 'dist/**', 'tools/**', '.playwright-mcp/**', '**/*.cjs', 'package-lock.json'],
     }
 );

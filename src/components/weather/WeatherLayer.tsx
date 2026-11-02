@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactElement } from 'react';
+import { type CSSProperties, memo, type ReactElement } from 'react';
 
 import type { WeatherContrast, WeatherKind } from './weatherPresentation';
 import { WEATHER_SCENES } from './weatherScenes';
@@ -15,6 +15,31 @@ export interface WeatherLayerProps {
     sectorIndex?: number;
     sectorCount?: number;
 }
+
+const getSymbolId = (contrast: WeatherContrast, kind: WeatherKind): string => `weather-${contrast}-${kind}`;
+
+// Scenes are defined once and referenced by every day with `<use>`, so the DOM doesn't repeat their geometry.
+// Styles of `weather-opacity.css` apply to the symbol content, CSS variables are inherited from the `<use>` host.
+// Must be rendered once on the page where `WeatherLayer` is used.
+export const WeatherSymbols = memo(function WeatherSymbols(): ReactElement {
+    return (
+        <svg className="absolute w-0 h-0 overflow-hidden" aria-hidden="true" focusable="false">
+            {(Object.keys(WEATHER_SCENES) as WeatherContrast[]).flatMap((contrast) =>
+                (Object.keys(WEATHER_SCENES[contrast]) as WeatherKind[])
+                    .filter((kind) => WEATHER_SCENES[contrast][kind])
+                    .map((kind) => (
+                        // Generated local geometry only; never insert API or user text here.
+                        <symbol
+                            key={getSymbolId(contrast, kind)}
+                            id={getSymbolId(contrast, kind)}
+                            viewBox="0 0 100 100"
+                            dangerouslySetInnerHTML={{ __html: WEATHER_SCENES[contrast][kind] }}
+                        />
+                    ))
+            )}
+        </svg>
+    );
+});
 
 const sectorClip = (index: number, count: number): string | undefined => {
     if (!Number.isInteger(count) || count <= 1) {
@@ -52,15 +77,9 @@ export const WeatherLayer = ({
             style={style}
             aria-hidden="true"
         >
-            {/* Generated local geometry only; never insert API or user text here. */}
-            <svg
-                className="weather-art__image"
-                viewBox="0 0 100 100"
-                width="100%"
-                height="100%"
-                aria-hidden="true"
-                dangerouslySetInnerHTML={{ __html: WEATHER_SCENES[contrast][kind] }}
-            />
+            <svg className="weather-art__image" viewBox="0 0 100 100" width="100%" height="100%" aria-hidden="true">
+                <use href={`#${getSymbolId(contrast, kind)}`} />
+            </svg>
         </span>
     );
 };
