@@ -1148,7 +1148,7 @@ export function ContinuousCalendar() {
             <WeatherSymbols />
             <div className="flex gap-8 justify-center px-8 mb-2">
                 <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] xl:w-[560px] ">
-                    <h1 className="text-3xl md:text-4xl xl:text-5xl font-bold font-serif text-center">
+                    <h1 className="text-2xl sm:text-3xl md:text-4xl xl:text-5xl font-bold font-serif text-center">
                         Continuous Calendar
                     </h1>
                 </div>
