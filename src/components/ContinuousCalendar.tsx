@@ -46,6 +46,9 @@ const WEATHER_REFRESH_MS = 60 * 60 * 1000;
 
 // Intervals panel is shown on the right on wide screens, a floating button opens it as a sheet otherwise
 const DESKTOP_PANEL_MEDIA = '(min-width: 64rem)';
+// Right padding of the desktop panel, enough for the widest scrollbar (17px on Windows, overlay ones on macOS), px.
+// A classic scrollbar takes its width from the padding, so the content doesn't move when the panel gets the scroll.
+const DESKTOP_PANEL_SCROLLBAR_SPACE = 24;
 
 // Overlays have their own paths, so the system "Back" gesture closes them
 const BASE_PATH = import.meta.env.BASE_URL;
@@ -877,26 +880,84 @@ export function ContinuousCalendar() {
         });
     }, [intervals, cities, defaultCity, weatherRefreshKey]);
 
-    // Desktop panel fits the viewport from its current top, also before it sticks, so its own scroll reaches the end
+    // Desktop panel continues down with the page until it sticks to the top, then it gets the viewport height and
+    // scrolls inside. It keeps scrolling after it is unstuck while scrolled, until it is scrolled back to the top,
+    // so the content doesn't jump.
+    // Scrolled to the end (or without scroll), it stays at the end while its content grows, so expanding settings or
+    // a block added at the bottom are followed during the animation. The focused element (the city picker of a new
+    // interval) is kept visible.
     useEffect(() => {
         const panel = desktopPanelRef.current;
-        if (!isDesktop || !panel) {
+        const content = panel?.firstElementChild;
+        if (!isDesktop || !panel || !content) {
             return;
         }
-        let frame = 0;
-        const updateMaxHeight = () => {
-            cancelAnimationFrame(frame);
-            frame = requestAnimationFrame(() => {
-                panel.style.maxHeight = `${window.innerHeight - Math.max(0, panel.getBoundingClientRect().top)}px`;
-            });
+        const isAtEnd = () => panel.scrollHeight - panel.scrollTop - panel.clientHeight < 2;
+        let isScrollable = false;
+        let isPinned = false;
+        let pinnedScrollTop = 0;
+        const updatePadding = () => {
+            const scrollbarWidth = isScrollable ? panel.offsetWidth - panel.clientWidth : 0;
+            panel.style.paddingRight = `${Math.max(0, DESKTOP_PANEL_SCROLLBAR_SPACE - scrollbarWidth)}px`;
         };
-        updateMaxHeight();
-        window.addEventListener('scroll', updateMaxHeight, { passive: true });
-        window.addEventListener('resize', updateMaxHeight);
+        const handleResize = () => {
+            updateScrollable();
+            // Page zoom changes the scrollbar width in CSS pixels
+            updatePadding();
+        };
+        const updateScrollable = () => {
+            const shouldScroll = panel.getBoundingClientRect().top < 1 || panel.scrollTop > 0;
+            if (shouldScroll === isScrollable) {
+                return;
+            }
+            isScrollable = shouldScroll;
+            panel.style.maxHeight = isScrollable ? '100vh' : '';
+            panel.style.overflowY = isScrollable ? 'auto' : '';
+            // The gutter is kept while the content fits, so the content doesn't move when it grows
+            panel.style.scrollbarGutter = isScrollable ? 'stable' : '';
+            updatePadding();
+            isPinned = isScrollable && isAtEnd();
+            pinnedScrollTop = panel.scrollTop;
+        };
+        const handleScroll = () => {
+            updateScrollable();
+            // The scroll event of our own scrolling comes after the content may have grown again,
+            // so the panel stays pinned unless it was scrolled up
+            if (!isScrollable || (isPinned && panel.scrollTop >= pinnedScrollTop - 1)) {
+                return;
+            }
+            isPinned = isAtEnd();
+        };
+        const resizeObserver = new ResizeObserver(() => {
+            if (!isPinned) {
+                return;
+            }
+            panel.scrollTop = panel.scrollHeight;
+            pinnedScrollTop = panel.scrollTop;
+            const focused = document.activeElement;
+            if (focused instanceof HTMLElement && panel.contains(focused)) {
+                const panelRect = panel.getBoundingClientRect();
+                if (focused.getBoundingClientRect().top < panelRect.top) {
+                    focused.scrollIntoView({ block: 'nearest' });
+                }
+            }
+            isPinned = isAtEnd();
+        });
+        updateScrollable();
+        resizeObserver.observe(panel);
+        resizeObserver.observe(content);
+        panel.addEventListener('scroll', handleScroll, { passive: true });
+        window.addEventListener('scroll', updateScrollable, { passive: true });
+        window.addEventListener('resize', handleResize);
         return () => {
-            cancelAnimationFrame(frame);
-            window.removeEventListener('scroll', updateMaxHeight);
-            window.removeEventListener('resize', updateMaxHeight);
+            resizeObserver.disconnect();
+            panel.removeEventListener('scroll', handleScroll);
+            window.removeEventListener('scroll', updateScrollable);
+            window.removeEventListener('resize', handleResize);
+            panel.style.maxHeight = '';
+            panel.style.overflowY = '';
+            panel.style.scrollbarGutter = '';
+            panel.style.paddingRight = '';
         };
     }, [isDesktop]);
 
@@ -1322,9 +1383,13 @@ export function ContinuousCalendar() {
 
                 {/* Intervals panel - wide screens only */}
                 <aside className="hidden lg:block w-72 flex-shrink-0">
+                    {/* Sticks from edge to edge over the week day headers, the gaps are paddings inside its scroll area.
+                        The negative margin puts it at the level of the headers, "Default city" is aligned with the week days.
+                        The opaque background makes the gaps between blocks part of the scroll area for the wheel.
+                        The right padding is the space for the scrollbar, the negative margin keeps the content width. */}
                     <div
                         ref={desktopPanelRef}
-                        className="sticky top-14 max-h-[calc(100vh-3.5rem)] overflow-y-auto px-1 pb-8"
+                        className="sticky top-0 z-30 -mt-14 -mr-5 pt-3.5 pb-8 pl-1 pr-6 bg-white"
                     >
                         {isDesktop && intervalsPanel}
                     </div>
