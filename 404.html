@@ -1,0 +1,12 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="UTF-8" />
+        <title>Continuous Calendar</title>
+        <script>
+            // GitHub Pages serves this page for unknown paths (e.g. /intervals after a reload):
+            // redirect to the app keeping search params. Vite substitutes the base path from vite.config.ts.
+            location.replace('%BASE_URL%' + location.search + location.hash);
+        </script>
+    </head>
+</html>

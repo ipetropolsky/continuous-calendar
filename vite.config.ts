@@ -14,6 +14,10 @@ export default defineConfig({
     build: {
         target: 'esnext',
         outDir: 'build',
+        rollupOptions: {
+            // 404.html redirects unknown paths on GitHub Pages to the app
+            input: ['index.html', '404.html'],
+        },
     },
     server: {
         port: 3000,

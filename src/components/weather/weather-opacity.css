@@ -1,0 +1,58 @@
+/* Transparency is controlled by the host, not by the SVG assets. */
+.weather-art {
+    --weather-cloud-opacity: 0.58;
+    --weather-sun-outer-opacity: 0.0704;
+    --weather-sun-inner-opacity: 0.1056;
+    --weather-sun-disc-opacity: 0.88;
+    --weather-rain-opacity: 0.76;
+    --weather-rain-halo-opacity: 0.17;
+    --weather-snow-opacity: 0.81;
+    --weather-snow-halo-opacity: 0.2;
+    --weather-fog-opacity: 0.38;
+}
+[data-weather-contrast='on-dark'] {
+    --weather-cloud-opacity: 0.34;
+    --weather-sun-outer-opacity: 0.0736;
+    --weather-sun-inner-opacity: 0.1104;
+    --weather-sun-disc-opacity: 0.92;
+    --weather-rain-opacity: 0.94;
+    --weather-snow-opacity: 0.9;
+    --weather-fog-opacity: 0.38;
+}
+[data-weather-surface='selected-off'] {
+    --weather-cloud-opacity: 0.43;
+    --weather-sun-outer-opacity: 0.16;
+    --weather-sun-inner-opacity: 0.25;
+}
+[data-weather-surface='vacation'] {
+    --weather-cloud-opacity: 0.28;
+    --weather-fog-opacity: 0.24;
+}
+.weather-cloud {
+    opacity: var(--weather-cloud-opacity);
+}
+.weather-sun-outer {
+    opacity: var(--weather-sun-outer-opacity);
+}
+.weather-sun-inner {
+    opacity: var(--weather-sun-inner-opacity);
+}
+.weather-sun-disc,
+.weather-bolt {
+    opacity: var(--weather-sun-disc-opacity);
+}
+.weather-rain {
+    opacity: var(--weather-rain-opacity);
+}
+.weather-rain-halo {
+    opacity: var(--weather-rain-halo-opacity);
+}
+.weather-snow {
+    opacity: var(--weather-snow-opacity);
+}
+.weather-snow-halo {
+    opacity: var(--weather-snow-halo-opacity);
+}
+.weather-fog {
+    opacity: var(--weather-fog-opacity);
+}

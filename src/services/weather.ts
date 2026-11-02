@@ -1,15 +1,3 @@
-import {
-    Cloud,
-    CloudDrizzle,
-    CloudFog,
-    CloudLightning,
-    CloudRain,
-    CloudSnow,
-    CloudSun,
-    type LucideIcon,
-    Sun,
-} from 'lucide-react';
-
 // Weather and geocoding are provided by Open-Meteo (https://open-meteo.com), no API key required
 
 export interface City {
@@ -25,6 +13,7 @@ export interface DayWeather {
     code: number;
     tMax: number;
     tMin: number;
+    isTypical?: boolean; // Estimated from past years statistics, not a forecast
 }
 
 export type WeatherByDate = Record<string, DayWeather>; // Keyed by YYYY-MM-DD
@@ -33,11 +22,20 @@ const GEOCODING_URL = 'https://geocoding-api.open-meteo.com/v1';
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive';
 
-// Forecast API covers ~3 months of the past and 16 days ahead (including today)
-const FORECAST_PAST_DAYS = 92;
+// Forecast API covers 16 days ahead (including today), its past data has gaps after ~50 days,
+// so older dates are taken from the archive which lags only a few days
+const FORECAST_PAST_DAYS = 7;
 const FORECAST_FUTURE_DAYS = 15;
 
-const LAST_CITY_STORAGE_KEY = 'lastCity';
+// Typical weather is calculated from the archive of past years, each day uses ± a few neighbouring days
+const CLIMATE_YEARS = 5;
+const CLIMATE_WINDOW_DAYS = 3;
+const WET_DAY_PRECIPITATION = 1; // mm
+
+const LEGACY_LAST_CITY_STORAGE_KEY = 'lastCity';
+const RECENT_CITIES_STORAGE_KEY = 'recentCities';
+const DEFAULT_CITY_STORAGE_KEY = 'defaultCity';
+const RECENT_CITIES_LIMIT = 3;
 
 const language = navigator.language.slice(0, 2);
 
@@ -162,48 +160,181 @@ export const fetchDailyWeather = (city: City, start: Date, end: Date): Promise<W
     return promise;
 };
 
-// WMO weather interpretation codes
-export const getWeatherInfo = (code: number): { icon: LucideIcon; description: string; color: string } => {
-    if (code === 0) {
-        return { icon: Sun, description: 'Clear sky', color: 'text-amber-500' };
-    }
-    if (code <= 2) {
-        return { icon: CloudSun, description: 'Partly cloudy', color: 'text-amber-500' };
-    }
-    if (code === 3) {
-        return { icon: Cloud, description: 'Overcast', color: 'text-slate-500' };
-    }
-    if (code === 45 || code === 48) {
-        return { icon: CloudFog, description: 'Fog', color: 'text-slate-500' };
-    }
-    if (code >= 51 && code <= 57) {
-        return { icon: CloudDrizzle, description: 'Drizzle', color: 'text-sky-500' };
-    }
-    if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) {
-        return { icon: CloudRain, description: 'Rain', color: 'text-sky-600' };
-    }
-    if ((code >= 71 && code <= 77) || code === 85 || code === 86) {
-        return { icon: CloudSnow, description: 'Snow', color: 'text-sky-400' };
-    }
-    if (code >= 95) {
-        return { icon: CloudLightning, description: 'Thunderstorm', color: 'text-violet-600' };
-    }
-    return { icon: Cloud, description: 'Cloudy', color: 'text-slate-500' };
+// Past weather from the given date and forecast up to the forecast horizon
+export const fetchWeatherUntilHorizon = (city: City, start: Date): Promise<WeatherByDate> => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return fetchDailyWeather(city, start, addDays(today, FORECAST_FUTURE_DAYS));
 };
 
-export const loadLastCity = (): City | null => {
+export const isBeyondForecast = (date: Date): boolean => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date > addDays(today, FORECAST_FUTURE_DAYS);
+};
+
+export type TypicalWeather = Record<string, DayWeather>; // Keyed by MM-DD
+
+const average = (values: number[]): number => values.reduce((sum, value) => sum + value, 0) / values.length;
+
+const median = (values: number[]): number => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+};
+
+interface ClimateSample {
+    precipitation: number;
+    snowWater: number;
+    cloudCover: number;
+    tMax: number;
+    tMin: number;
+}
+
+// WMO weather code that describes the most typical day among samples
+const getTypicalCode = (samples: ClimateSample[]): number => {
+    const wetSamples = samples.filter(({ precipitation }) => precipitation >= WET_DAY_PRECIPITATION);
+    if (wetSamples.length / samples.length >= 0.45) {
+        const snowySamples = wetSamples.filter(({ precipitation, snowWater }) => snowWater >= precipitation / 2);
+        const isSnowy = snowySamples.length / wetSamples.length >= 0.5;
+        const wetPrecipitation = median(wetSamples.map(({ precipitation }) => precipitation));
+        if (isSnowy) {
+            return wetPrecipitation >= 5 ? 73 : 71;
+        }
+        return wetPrecipitation >= 5 ? 63 : 61;
+    }
+    const cloudCover = average(samples.map(({ cloudCover }) => cloudCover));
+    if (cloudCover >= 80) {
+        return 3;
+    }
+    if (cloudCover >= 45) {
+        return 2;
+    }
+    return 0;
+};
+
+const climateCache = new Map<number, Promise<TypicalWeather>>();
+
+// Typical weather for every day of the year based on the last full years of the archive
+export const fetchTypicalWeather = (city: City): Promise<TypicalWeather> => {
+    const cached = climateCache.get(city.id);
+    if (cached) {
+        return cached;
+    }
+
+    const lastYear = new Date().getFullYear() - 1;
+    const params = new URLSearchParams({
+        latitude: city.latitude.toString(),
+        longitude: city.longitude.toString(),
+        daily: 'precipitation_sum,snowfall_sum,cloud_cover_mean,temperature_2m_max,temperature_2m_min',
+        timezone: 'auto',
+        start_date: `${lastYear - CLIMATE_YEARS + 1}-01-01`,
+        end_date: `${lastYear}-12-31`,
+    });
+
+    const promise = fetch(`${ARCHIVE_URL}?${params}`)
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error(`Climate request failed: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(
+            (data: {
+                daily: {
+                    time: string[];
+                    precipitation_sum: (number | null)[];
+                    snowfall_sum: (number | null)[];
+                    cloud_cover_mean: (number | null)[];
+                    temperature_2m_max: (number | null)[];
+                    temperature_2m_min: (number | null)[];
+                };
+            }) => {
+                const { daily } = data;
+                // Samples grouped by day of the year (MM-DD)
+                const samplesByDay = new Map<string, ClimateSample[]>();
+                daily.time.forEach((date, index) => {
+                    const precipitation = daily.precipitation_sum[index];
+                    const cloudCover = daily.cloud_cover_mean[index];
+                    const tMax = daily.temperature_2m_max[index];
+                    const tMin = daily.temperature_2m_min[index];
+                    if (precipitation === null || cloudCover === null || tMax === null || tMin === null) {
+                        return;
+                    }
+                    const sample: ClimateSample = {
+                        precipitation,
+                        // Snowfall in cm is about 0.7 of its water equivalent in mm
+                        snowWater: (daily.snowfall_sum[index] ?? 0) / 0.7,
+                        cloudCover,
+                        tMax,
+                        tMin,
+                    };
+                    const dayDate = new Date(`${date}T00:00:00`);
+                    for (let offset = -CLIMATE_WINDOW_DAYS; offset <= CLIMATE_WINDOW_DAYS; offset++) {
+                        const key = formatDate(addDays(dayDate, offset)).slice(5);
+                        const samples = samplesByDay.get(key) ?? [];
+                        samples.push(sample);
+                        samplesByDay.set(key, samples);
+                    }
+                });
+
+                const result: TypicalWeather = {};
+                samplesByDay.forEach((samples, key) => {
+                    result[key] = {
+                        code: getTypicalCode(samples),
+                        tMax: average(samples.map(({ tMax }) => tMax)),
+                        tMin: average(samples.map(({ tMin }) => tMin)),
+                        isTypical: true,
+                    };
+                });
+                return result;
+            }
+        );
+    // Allow retry on failure
+    promise.catch(() => climateCache.delete(city.id));
+    climateCache.set(city.id, promise);
+    return promise;
+};
+
+const loadJSON = <T>(key: string): T | null => {
     try {
-        const stored = localStorage.getItem(LAST_CITY_STORAGE_KEY);
-        return stored ? (JSON.parse(stored) as City) : null;
+        const stored = localStorage.getItem(key);
+        return stored ? (JSON.parse(stored) as T) : null;
     } catch {
         return null;
     }
 };
 
-export const saveLastCity = (city: City) => {
+const saveJSON = (key: string, value: unknown) => {
     try {
-        localStorage.setItem(LAST_CITY_STORAGE_KEY, JSON.stringify(city));
+        if (value === null) {
+            localStorage.removeItem(key);
+        } else {
+            localStorage.setItem(key, JSON.stringify(value));
+        }
     } catch {
         // Ignore storage errors (private mode, quota)
     }
 };
+
+// Recently chosen cities, the most recent first. The first one is the default for new intervals.
+export const loadRecentCities = (): City[] => {
+    const recentCities = loadJSON<City[]>(RECENT_CITIES_STORAGE_KEY);
+    if (recentCities) {
+        return recentCities;
+    }
+    const legacyLastCity = loadJSON<City>(LEGACY_LAST_CITY_STORAGE_KEY);
+    return legacyLastCity ? [legacyLastCity] : [];
+};
+
+export const addRecentCity = (recentCities: City[], city: City): City[] =>
+    [city, ...recentCities.filter(({ id }) => id !== city.id)].slice(0, RECENT_CITIES_LIMIT);
+
+export const saveRecentCities = (recentCities: City[]) => {
+    saveJSON(RECENT_CITIES_STORAGE_KEY, recentCities);
+    saveJSON(LEGACY_LAST_CITY_STORAGE_KEY, null);
+};
+
+// City used to show weather on days outside of intervals
+export const loadDefaultCity = (): City | null => loadJSON<City>(DEFAULT_CITY_STORAGE_KEY);
+
+export const saveDefaultCity = (city: City | null) => saveJSON(DEFAULT_CITY_STORAGE_KEY, city);

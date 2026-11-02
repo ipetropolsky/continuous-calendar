@@ -1,18 +1,87 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 
-import { MapPin, Settings, X } from 'lucide-react';
+import { CalendarRange, MapPin, Settings, X } from 'lucide-react';
 
-import { CityPicker } from '@/components/CityPicker';
+import { BottomSheet } from '@/components/BottomSheet';
+import { type IntervalItem, IntervalsPanel } from '@/components/IntervalsPanel';
+import { WeatherLayer } from '@/components/weather/WeatherLayer';
+import { getWeatherKind, WEATHER_LABELS, type WeatherKind } from '@/components/weather/weatherPresentation';
 import { calendarConfig, holidayDates, vacationDates } from '@/config/calendarConfig';
 import {
+    addRecentCity,
     type City,
     fetchDailyWeather,
+    fetchTypicalWeather,
+    fetchWeatherUntilHorizon,
+    formatCityLabel,
     getCityById,
-    getWeatherInfo,
-    loadLastCity,
-    saveLastCity,
+    isBeyondForecast,
+    loadDefaultCity,
+    loadRecentCities,
+    saveDefaultCity,
+    saveRecentCities,
+    type TypicalWeather,
     type WeatherByDate,
 } from '@/services/weather';
+
+// Intervals panel is shown on the right on wide screens, a floating button opens it as a sheet otherwise
+const DESKTOP_PANEL_MEDIA = '(min-width: 64rem)';
+
+// Overlays have their own paths, so the system "Back" gesture closes them
+const BASE_PATH = import.meta.env.BASE_URL;
+const OVERLAYS = ['intervals', 'settings'] as const;
+type Overlay = (typeof OVERLAYS)[number];
+
+const getOverlay = (): Overlay | null => {
+    const path = window.location.pathname.replace(/\/$/, '');
+    return OVERLAYS.find((overlay) => path === `${BASE_PATH}${overlay}`) ?? null;
+};
+
+const getPathURL = (path: string): string => `${path}${window.location.search}${window.location.hash}`;
+
+// URL state written by the app. An overlay entry and the entry under it must share search params,
+// otherwise "Back" from the overlay would restore intervals from before it was opened.
+let lastSearch = window.location.search;
+let lastOverlay = getOverlay();
+
+const rememberURL = () => {
+    lastSearch = window.location.search;
+    lastOverlay = getOverlay();
+};
+
+// After history navigation between an overlay and the page under it, keep the latest search params
+const syncURLAfterPopState = () => {
+    if (lastOverlay !== getOverlay() && window.location.search !== lastSearch) {
+        window.history.replaceState(
+            window.history.state,
+            '',
+            `${window.location.pathname}${lastSearch}${window.location.hash}`
+        );
+    }
+    rememberURL();
+};
+
+const enterOverlayPath = (overlay: Overlay) => {
+    if (getOverlay() !== overlay) {
+        window.history.pushState({ overlay }, '', getPathURL(`${BASE_PATH}${overlay}`));
+        rememberURL();
+    }
+};
+
+// Leave an overlay path: go back to the entry pushed on opening, otherwise replace the URL.
+// Returns true if the overlay will be hidden on popstate.
+const leaveOverlayPath = (): boolean => {
+    if (!getOverlay()) {
+        return false;
+    }
+    if (window.history.state?.overlay) {
+        window.history.back();
+        return true;
+    }
+    window.history.replaceState(null, '', getPathURL(BASE_PATH));
+    rememberURL();
+    return false;
+};
 
 interface CalendarDay {
     date: Date;
@@ -38,8 +107,6 @@ interface DateStatus {
     isSelected: boolean;
     isInInterval: boolean;
     intervalId: string | null;
-    isIntervalEnd: boolean;
-    endIntervalId: string | null; // Interval that ends on this date (may differ from intervalId for overlapping intervals)
 }
 
 export function ContinuousCalendar() {
@@ -52,14 +119,39 @@ export function ContinuousCalendar() {
     const [showVacations, setShowVacations] = useState(false);
     const [showPastDates, setShowPastDates] = useState(false);
     const [shouldScrollToToday, setShouldScrollToToday] = useState(false);
-    const [lastCity, setLastCity] = useState<City | null>(loadLastCity);
-    const [cities, setCities] = useState<Record<number, City>>(() => {
-        const storedCity = loadLastCity();
-        return storedCity ? { [storedCity.id]: storedCity } : {};
-    });
+    const [recentCities, setRecentCities] = useState<City[]>(loadRecentCities);
+    const [defaultCity, setDefaultCity] = useState<City | null>(loadDefaultCity);
+    const [cities, setCities] = useState<Record<number, City>>(() =>
+        Object.fromEntries(
+            [...loadRecentCities(), loadDefaultCity()].filter((city) => !!city).map((city) => [city.id, city])
+        )
+    );
     const [weather, setWeather] = useState<Record<number, WeatherByDate>>({});
+    // Typical weather by past years statistics for dates beyond the forecast
+    const [typicalWeather, setTypicalWeather] = useState<Record<number, TypicalWeather>>({});
     const [cityPickerIntervalId, setCityPickerIntervalId] = useState<string | null>(null);
     const closeCityPicker = useCallback(() => setCityPickerIntervalId(null), []);
+    // Mobile full-screen sheet with intervals: mounted flag and visibility flag for the slide animation
+    const [showIntervalsSheet, setShowIntervalsSheet] = useState(false);
+
+    const showSheet = useCallback(() => setShowIntervalsSheet(true), []);
+
+    const hideSheet = useCallback(() => {
+        setShowIntervalsSheet(false);
+        setCityPickerIntervalId(null);
+    }, []);
+
+    // Settings modal: mounted flag and visibility flag for the fade animation
+    const showSettingsModal = useCallback(() => {
+        setShowSettings(true);
+        setTimeout(() => setSettingsVisible(true), 10);
+    }, []);
+
+    const hideSettingsModal = useCallback(() => {
+        setSettingsVisible(false);
+        setTimeout(() => setShowSettings(false), 200);
+    }, []);
+    const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_PANEL_MEDIA).matches);
 
     const { firstVisibleDate, startDate, endDate, monthNames, weekDayLabels } = calendarConfig;
 
@@ -179,24 +271,6 @@ export function ContinuousCalendar() {
     const days = generateCalendarData();
     const weeks = organizeIntoWeeks(days);
 
-    // Calculate which weeks have new months for sidebar positioning
-    const getMonthPositions = () => {
-        const monthPositions: { weekIndex: number; monthName: string; year: number }[] = [];
-
-        weeks.forEach((week, weekIndex) => {
-            const firstDayOfMonth = week.find((day) => day && day.isNewMonth);
-            if (firstDayOfMonth) {
-                monthPositions.push({
-                    weekIndex,
-                    monthName: firstDayOfMonth.monthName,
-                    year: firstDayOfMonth.year,
-                });
-            }
-        });
-
-        return monthPositions;
-    };
-
     // Check if a week should be hidden (all days before firstVisibleDate)
     const shouldHideWeek = (week: (CalendarDay | null)[]): boolean => {
         if (showPastDates) {
@@ -211,8 +285,6 @@ export function ContinuousCalendar() {
         }
         return true;
     };
-
-    const monthPositions = getMonthPositions();
 
     // URL encoding/decoding functions
     const encodeIntervalToURL = (interval: DateInterval): string => {
@@ -263,6 +335,14 @@ export function ContinuousCalendar() {
 
     // Parse URL on component mount
     useLayoutEffect(() => {
+        // Scroll position is managed by the calendar, also when the sheet path is left with "Back"
+        window.history.scrollRestoration = 'manual';
+        // Any other path (overlay path after a reload, unknown path) is replaced with the main page
+        if (window.location.pathname !== BASE_PATH) {
+            window.history.replaceState(null, '', getPathURL(BASE_PATH));
+            rememberURL();
+        }
+
         const urlParams = new URLSearchParams(window.location.search);
         const parsedIntervals = urlParams
             .getAll('dates')
@@ -335,7 +415,7 @@ export function ContinuousCalendar() {
                 setCities((prev) => ({ ...prev, [city.id]: city }));
                 // Use city of the last interval as default if nothing was chosen before
                 if (city.id === lastIntervalCityId) {
-                    setLastCity((prev) => prev ?? city);
+                    setRecentCities((prev) => (prev.length > 0 ? prev : [city]));
                 }
             });
         });
@@ -358,6 +438,84 @@ export function ContinuousCalendar() {
                 .catch((error) => console.error('Failed to load weather:', error));
         });
     }, [intervals, cities]);
+
+    // Load typical weather for interval cities and the default city
+    useEffect(() => {
+        const cityIds = new Set(intervals.map(({ cityId }) => cityId));
+        const typicalCities = Object.values(cities).filter(({ id }) => cityIds.has(id) || id === defaultCity?.id);
+        typicalCities.forEach((city) => {
+            fetchTypicalWeather(city)
+                .then((weatherByDay) => setTypicalWeather((prev) => ({ ...prev, [city.id]: weatherByDay })))
+                .catch((error) => console.error('Failed to load typical weather:', error));
+        });
+    }, [intervals, cities, defaultCity]);
+
+    // Switch between the desktop panel and the mobile sheet
+    useEffect(() => {
+        const mediaQuery = window.matchMedia(DESKTOP_PANEL_MEDIA);
+        const handleChange = () => {
+            setIsDesktop(mediaQuery.matches);
+            if (mediaQuery.matches) {
+                if (getOverlay() === 'intervals') {
+                    setShowIntervalsSheet(false);
+                    leaveOverlayPath();
+                }
+            }
+        };
+        mediaQuery.addEventListener('change', handleChange);
+        return () => mediaQuery.removeEventListener('change', handleChange);
+    }, []);
+
+    // Open and close the sheet on history navigation ("Back" and "Forward" gestures)
+    useEffect(() => {
+        const handlePopState = () => {
+            syncURLAfterPopState();
+            const overlay = getOverlay();
+            if (overlay === 'intervals' && !window.matchMedia(DESKTOP_PANEL_MEDIA).matches) {
+                showSheet();
+            } else {
+                hideSheet();
+            }
+            if (overlay === 'settings') {
+                showSettingsModal();
+            } else {
+                hideSettingsModal();
+            }
+        };
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, [hideSheet, showSheet, showSettingsModal, hideSettingsModal]);
+
+    // Close settings or the sheet on Esc if no city picker is open (the picker handles Esc itself)
+    useEffect(() => {
+        if (!(showSettings || showIntervalsSheet) || cityPickerIntervalId) {
+            return;
+        }
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key !== 'Escape') {
+                return;
+            }
+            if (showSettings) {
+                closeSettings();
+            } else {
+                closeIntervalsSheet();
+            }
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    });
+
+    // Load forecast for the default city
+    useEffect(() => {
+        if (!defaultCity) {
+            return;
+        }
+        fetchWeatherUntilHorizon(defaultCity, startDate)
+            .then((weatherByDate) =>
+                setWeather((prev) => ({ ...prev, [defaultCity.id]: { ...prev[defaultCity.id], ...weatherByDate } }))
+            )
+            .catch((error) => console.error('Failed to load weather:', error));
+    }, [defaultCity, startDate]);
 
     // Scroll to selected month, to the first interval, or to today
     useEffect(() => {
@@ -470,6 +628,7 @@ export function ContinuousCalendar() {
 
         const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
         window.history.pushState({}, '', newUrl);
+        rememberURL();
     };
 
     // Helper functions for interval selection
@@ -490,73 +649,124 @@ export function ContinuousCalendar() {
                 id: `${Date.now()}-${Math.random()}`,
                 startDate: sortedStart,
                 endDate: sortedEnd,
-                cityId: lastCity?.id,
+                cityId: recentCities[0]?.id,
             };
 
             const updatedIntervals = [...intervals, newInterval];
             setSelectedStart(null);
             updateIntervals(updatedIntervals);
-            setCityPickerIntervalId(newInterval.id);
+            // Desktop panel is always visible, so offer to change the city there.
+            // On mobile open the sheet only if there is no default city.
+            if (isDesktop) {
+                setCityPickerIntervalId(newInterval.id);
+            } else if (!newInterval.cityId) {
+                setCityPickerIntervalId(newInterval.id);
+                openIntervalsSheet();
+            }
+        }
+    };
+
+    const openIntervalsSheet = () => {
+        enterOverlayPath('intervals');
+        showSheet();
+    };
+
+    // Hiding happens on popstate after going back, or right away if there is no overlay history entry
+    const closeIntervalsSheet = () => {
+        if (!leaveOverlayPath()) {
+            hideSheet();
+        }
+    };
+
+    const openSettings = () => {
+        enterOverlayPath('settings');
+        showSettingsModal();
+    };
+
+    const closeSettings = () => {
+        if (!leaveOverlayPath()) {
+            hideSettingsModal();
         }
     };
 
     const handleCitySelect = (intervalId: string, city: City) => {
-        setCities((prev) => ({ ...prev, [city.id]: city }));
-        setLastCity(city);
-        saveLastCity(city);
+        rememberCity(city);
         setCityPickerIntervalId(null);
         updateIntervals(
             intervals.map((interval) => (interval.id === intervalId ? { ...interval, cityId: city.id } : interval))
         );
     };
 
+    const rememberCity = (city: City) => {
+        setCities((prev) => ({ ...prev, [city.id]: city }));
+        const updatedRecentCities = addRecentCity(recentCities, city);
+        setRecentCities(updatedRecentCities);
+        saveRecentCities(updatedRecentCities);
+    };
+
+    const handleDefaultCitySelect = (city: City | null) => {
+        if (city) {
+            rememberCity(city);
+        }
+        setDefaultCity(city);
+        saveDefaultCity(city);
+        setCityPickerIntervalId(null);
+    };
+
     const getIntervalCity = (interval: DateInterval | undefined): City | null =>
         interval?.cityId ? (cities[interval.cityId] ?? null) : null;
 
-    // Weather of all intervals covering the date in intervals order, grouped by weather icon
-    const getDayWeathers = (date: Date) => {
-        const dateString = formatDateString(date);
-        const dayWeathers: { interval: DateInterval; info: ReturnType<typeof getWeatherInfo>; titles: string[] }[] = [];
-        const cityIds = new Set<number>();
-
+    // Weather of the day is taken from the interval that starts later (or ends later if both start on the same day),
+    // days without interval weather show the default city weather.
+    // Beyond the forecast horizon typical weather by past years statistics is used.
+    const getDayWeather = (date: Date): { kind: WeatherKind; isTypical: boolean; title: string } | null => {
+        let displayInterval: DateInterval | undefined;
         for (const interval of intervals) {
             if (date < interval.startDate || date > interval.endDate || !interval.cityId) {
                 continue;
             }
-            const dayWeather = weather[interval.cityId]?.[dateString];
-            if (!dayWeather || cityIds.has(interval.cityId)) {
-                continue;
-            }
-            cityIds.add(interval.cityId);
-
-            const info = getWeatherInfo(dayWeather.code);
-            const title = `${getIntervalCity(interval)?.name ?? ''}: ${info.description}, ${Math.round(dayWeather.tMax)}° / ${Math.round(dayWeather.tMin)}°`;
-            const sameWeather = dayWeathers.find((item) => item.info.icon === info.icon);
-            if (sameWeather) {
-                sameWeather.titles.push(title);
-            } else {
-                dayWeathers.push({ interval, info, titles: [title] });
+            if (
+                !displayInterval ||
+                interval.startDate > displayInterval.startDate ||
+                (interval.startDate.getTime() === displayInterval.startDate.getTime() &&
+                    interval.endDate > displayInterval.endDate)
+            ) {
+                displayInterval = interval;
             }
         }
 
-        return dayWeathers;
+        const dateString = formatDateString(date);
+        const canBeTypical = isBeyondForecast(date);
+        const getCityWeather = (city: City | null) =>
+            city
+                ? (weather[city.id]?.[dateString] ??
+                  (canBeTypical ? typicalWeather[city.id]?.[dateString.slice(5)] : undefined))
+                : undefined;
+
+        let city = getIntervalCity(displayInterval);
+        let dayWeather = getCityWeather(city);
+        if (!dayWeather && defaultCity) {
+            city = defaultCity;
+            dayWeather = getCityWeather(defaultCity);
+        }
+        if (!city || !dayWeather) {
+            return null;
+        }
+        const kind = getWeatherKind(dayWeather.code);
+        const temperature = `${Math.round(dayWeather.tMax)}° / ${Math.round(dayWeather.tMin)}°`;
+        return {
+            kind,
+            isTypical: !!dayWeather.isTypical,
+            title: dayWeather.isTypical
+                ? `${city.name}, typical weather: ${WEATHER_LABELS[kind]}, ${temperature}`
+                : `${city.name}: ${WEATHER_LABELS[kind]}, ${temperature}`,
+        };
     };
 
-    // Check if any day of the interval has weather data
-    const hasIntervalWeather = (interval: DateInterval): boolean => {
-        const cityWeather = interval.cityId ? weather[interval.cityId] : undefined;
-        if (!cityWeather) {
-            return false;
-        }
-        const currentDate = new Date(interval.startDate);
-        while (currentDate <= interval.endDate) {
-            if (cityWeather[formatDateString(currentDate)]) {
-                return true;
-            }
-            currentDate.setDate(currentDate.getDate() + 1);
-        }
-        return false;
-    };
+    // Intervals for the panel, in calendar order
+    const intervalItems: IntervalItem[] = [...intervals]
+        .sort((a, b) => a.startDate.getTime() - b.startDate.getTime() || a.endDate.getTime() - b.endDate.getTime())
+        .map((interval) => ({ ...interval, city: getIntervalCity(interval) }));
 
     const updateIntervals = (newIntervals: DateInterval[]) => {
         setIntervals(newIntervals);
@@ -569,7 +779,8 @@ export function ContinuousCalendar() {
         });
 
         const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
-        window.history.replaceState({}, '', newUrl);
+        window.history.replaceState(window.history.state, '', newUrl);
+        rememberURL();
     };
 
     const removeInterval = (intervalId: string) => {
@@ -590,8 +801,6 @@ export function ContinuousCalendar() {
                 isSelected: true,
                 isInInterval: false,
                 intervalId: null,
-                isIntervalEnd: false,
-                endIntervalId: null,
             };
         }
 
@@ -599,8 +808,6 @@ export function ContinuousCalendar() {
             isSelected: false,
             isInInterval: false,
             intervalId: null,
-            isIntervalEnd: false,
-            endIntervalId: null,
         };
 
         // Check if date is in any interval
@@ -611,49 +818,53 @@ export function ContinuousCalendar() {
             if (dateTime >= startTime && dateTime <= endTime) {
                 dateStatus.isInInterval = true;
                 dateStatus.intervalId = interval.id;
-                if (dateTime === endTime) {
-                    dateStatus.isIntervalEnd = true;
-                    dateStatus.endIntervalId = interval.id;
-                }
             }
         }
 
         return dateStatus;
     };
 
+    const intervalsPanel = (
+        <IntervalsPanel
+            intervals={intervalItems}
+            defaultCity={defaultCity}
+            recentCities={recentCities}
+            cityPickerIntervalId={cityPickerIntervalId}
+            onDefaultCitySelect={handleDefaultCitySelect}
+            onOpenCityPicker={setCityPickerIntervalId}
+            onCloseCityPicker={closeCityPicker}
+            onCitySelect={handleCitySelect}
+            onRemove={removeInterval}
+            onShow={(interval) => {
+                if (showIntervalsSheet) {
+                    closeIntervalsSheet();
+                }
+                scrollToDate(interval.startDate);
+            }}
+        />
+    );
+
     const hiddenWeeksCount = weeks.reduce((result, week) => result + (shouldHideWeek(week) ? 1 : 0), 0);
 
     return (
-        <div className="w-full max-w-7xl mx-auto py-8 md:p-8">
+        <div className="w-full max-w-7xl mx-auto py-8 md:p-8 overflow-x-clip">
             <div className="flex gap-8 justify-center px-8 mb-2">
-                <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] flex justify-between">
+                <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] xl:w-[560px] flex justify-between">
                     <div className="flex-1 flex flex-col md:items-center">
                         <h1 className="text-2xl md:text-3xl font-bold font-serif md:mb-1">Continuous Calendar</h1>
                         <p className="text-gray-500 font-serif">2026 — 2027</p>
                     </div>
-                    <div className="md:hidden flex items-center">
+                    <div className="flex items-center">
                         <button
                             className="p-2 text-gray-500 hover:text-gray-700 transition-colors rounded-full hover:bg-gray-100"
-                            onClick={() => {
-                                setShowSettings(true);
-                                setTimeout(() => setSettingsVisible(true), 10);
-                            }}
+                            aria-label="Settings"
+                            onClick={openSettings}
                         >
                             <Settings className="w-5 h-5" />
                         </button>
                     </div>
                 </div>
-                <div className="hidden md:block md:w-24 flex-shrink-0">
-                    <button
-                        className="p-2 text-gray-500 hover:text-gray-700 transition-colors rounded-full hover:bg-gray-100"
-                        onClick={() => {
-                            setShowSettings(true);
-                            setTimeout(() => setSettingsVisible(true), 10);
-                        }}
-                    >
-                        <Settings className="w-5 h-5" />
-                    </button>
-                </div>
+                <div className="hidden lg:block w-72 flex-shrink-0" />
             </div>
 
             {/* Settings Modal */}
@@ -662,10 +873,7 @@ export function ContinuousCalendar() {
                     className={`fixed inset-0 flex items-center justify-center z-50 transition-all duration-200 ease-in-out ${
                         settingsVisible ? 'bg-black/75' : 'bg-black/0'
                     }`}
-                    onClick={() => {
-                        setSettingsVisible(false);
-                        setTimeout(() => setShowSettings(false), 200);
-                    }}
+                    onClick={closeSettings}
                 >
                     <div
                         className={`bg-white rounded-xl shadow-2xl p-8 w-full max-w-md mx-4 transform transition-all duration-200 ease-in-out ${
@@ -677,10 +885,8 @@ export function ContinuousCalendar() {
                             <h2 className="text-2xl font-semibold text-gray-800">Settings</h2>
                             <button
                                 className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition-colors"
-                                onClick={() => {
-                                    setSettingsVisible(false);
-                                    setTimeout(() => setShowSettings(false), 200);
-                                }}
+                                aria-label="Close"
+                                onClick={closeSettings}
                             >
                                 <X className="w-6 h-6" />
                             </button>
@@ -703,7 +909,8 @@ export function ContinuousCalendar() {
                                                 urlParams.delete('vc');
                                             }
                                             const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
-                                            window.history.replaceState({}, '', newUrl);
+                                            window.history.replaceState(window.history.state, '', newUrl);
+                                            rememberURL();
                                         }}
                                         className="w-5 h-5 mt-1 text-blue-600 border-2 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
                                     />
@@ -725,7 +932,7 @@ export function ContinuousCalendar() {
             {/* Sticky week day headers - responsive width */}
             <div className="sticky top-0 bg-white z-20 px-8 pt-2 mb-4">
                 <div className="flex gap-8 justify-center">
-                    <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px]">
+                    <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] xl:w-[560px]">
                         <div className="grid grid-cols-7 gap-1">
                             {weekDayLabels.map((label) => (
                                 <div
@@ -737,22 +944,20 @@ export function ContinuousCalendar() {
                             ))}
                         </div>
                     </div>
-                    <div className="hidden md:block w-24 flex-shrink-0">
-                        {/* Empty space for sidebar alignment on desktop */}
-                    </div>
+                    <div className="hidden lg:block w-72 flex-shrink-0" />
                 </div>
             </div>
 
             <div className="flex gap-8 px-8 justify-center">
                 {/* Calendar section */}
-                <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] flex-col relative">
+                <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] xl:w-[560px] flex-col relative">
                     {/* Calendar grid */}
                     <div>
                         {/* Past dates button for mobile */}
                         {hiddenWeeksCount > 0 && !showPastDates && (
                             <button
                                 onClick={() => setShowPastDates(true)}
-                                className="md:hidden absolute -left-1 -top-22 -translate-x-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-700 hover:text-blue-500 transition-colors bg-sky-50 hover:bg-sky-100 rounded p-1 z-20"
+                                className="absolute -left-1 -top-22 -translate-x-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-700 hover:text-blue-500 transition-colors bg-sky-50 hover:bg-sky-100 rounded p-1 z-20"
                             >
                                 Past →
                             </button>
@@ -761,21 +966,11 @@ export function ContinuousCalendar() {
                         {weeks.map((week, weekIndex) => {
                             // Check if this week has the first day of a new month
                             const firstDayOfMonth = week.find((day) => day && day.isNewMonth);
-                            // Raise the week above the following ones if it contains the open city picker
-                            const hasCityPicker = week.some(
-                                (day) =>
-                                    day &&
-                                    intervals.some(
-                                        (interval) =>
-                                            interval.id === cityPickerIntervalId &&
-                                            interval.endDate.getTime() === day.date.getTime()
-                                    )
-                            );
 
                             return (
                                 <div
                                     key={weekIndex}
-                                    className={`relative ${hasCityPicker ? 'z-30' : 'z-10'} transition-all duration-500 ease-in-out ${
+                                    className={`relative z-10 transition-all duration-500 ease-in-out ${
                                         shouldHideWeek(week)
                                             ? 'max-h-0 overflow-hidden mb-0 opacity-0'
                                             : 'max-h-[10000px] opacity-100 mb-2 md:mb-0'
@@ -784,7 +979,6 @@ export function ContinuousCalendar() {
                                     {/* Month label for mobile - above first day of month */}
                                     {firstDayOfMonth && !shouldHideWeek(week) && (
                                         <div
-                                            className="md:hidden"
                                             onClick={() =>
                                                 handleMonthClick(firstDayOfMonth.year, firstDayOfMonth.monthName)
                                             }
@@ -800,131 +994,98 @@ export function ContinuousCalendar() {
                                     <div className="grid grid-cols-7 gap-1 mb-2 md:mb-0">
                                         {week.map((day, dayIndex) => {
                                             if (!day) {
-                                                return <div key={dayIndex} className="h-12 md:h-16" />;
+                                                return <div key={dayIndex} className="h-12 md:h-16 xl:h-20" />;
                                             }
 
                                             const dateStatus = getDateStatus(day.date);
 
+                                            const isSelectedDay = dateStatus.isSelected || dateStatus.isInInterval;
+                                            // Selected vacations look like selected weekends, unselected vacation weekends stay weekends
+                                            const isOffDay = day.isHoliday || day.isWeekend;
+
                                             // Determine text color based on day type
                                             let dayClass = 'text-slate-800';
-                                            if (dateStatus.isSelected || dateStatus.isInInterval) {
+                                            if (isSelectedDay) {
                                                 dayClass = 'text-zinc-50';
                                             } else if (day.isVacation) {
                                                 dayClass = 'text-orange-600';
-                                            } else if (day.isHoliday || day.isWeekend) {
+                                            } else if (isOffDay) {
                                                 dayClass = 'text-red-600';
                                             }
 
                                             // Determine background colors based on selection status
                                             let bgClass = 'bg-zinc-50 hover:bg-zinc-100';
-                                            if (dateStatus.isSelected || dateStatus.isInInterval) {
-                                                if (day.isWorkingDay && !day.isVacation) {
-                                                    bgClass = 'bg-slate-600 hover:bg-slate-700';
-                                                } else if (day.isVacation) {
+                                            if (isSelectedDay) {
+                                                if (isOffDay || day.isVacation) {
                                                     bgClass = 'bg-red-600 hover:bg-red-700';
-                                                } else if (day.isHoliday || day.isWeekend) {
-                                                    bgClass = 'bg-red-600 hover:bg-orange-700';
                                                 } else {
-                                                    bgClass = 'bg-slate-500 hover:bg-slate-600';
+                                                    bgClass = 'bg-slate-600 hover:bg-slate-700';
                                                 }
                                             } else if (day.isVacation) {
                                                 bgClass = 'bg-orange-50 hover:bg-orange-100';
-                                            } else if (day.isHoliday || day.isWeekend) {
+                                            } else if (isOffDay) {
                                                 bgClass = 'bg-rose-50 hover:bg-rose-100';
                                             }
 
                                             // Check if today - add ring based on day type and selection
                                             const todayClass = isToday(day.date)
-                                                ? 'ring-4 md:ring-4 ring-red-600/30'
+                                                ? 'outline-2 outline-offset-2 sm:outline-3 sm:outline-offset-3 outline-[#f3adb7]'
                                                 : '';
 
-                                            // Weather for days in intervals with a chosen city
-                                            const dayWeathers = dateStatus.isInInterval ? getDayWeathers(day.date) : [];
-                                            // Interval ending on this date: owns delete button, city button and city picker
-                                            const endInterval = dateStatus.endIntervalId
-                                                ? intervals.find(({ id }) => id === dateStatus.endIntervalId)
-                                                : undefined;
-                                            // City picker button for the interval end if there is no weather to click on
-                                            const showCityButton = !!endInterval && !hasIntervalWeather(endInterval);
-                                            const isCityPickerOpen =
-                                                !!endInterval && endInterval.id === cityPickerIntervalId;
+                                            const dayWeather = getDayWeather(day.date);
+                                            let weatherSurface: 'default' | 'selected-off' | 'vacation' = 'default';
+                                            if (isSelectedDay && (isOffDay || day.isVacation)) {
+                                                weatherSurface = 'selected-off';
+                                            } else if (!isSelectedDay && day.isVacation) {
+                                                weatherSurface = 'vacation';
+                                            }
 
+                                            // City label on the first day of an interval
+                                            const startingInterval = intervals.find(
+                                                (interval) => interval.startDate.getTime() === day.date.getTime()
+                                            );
+                                            const startingCity = startingInterval?.cityId
+                                                ? cities[startingInterval.cityId]
+                                                : undefined;
+
+                                            // The cell has no z-index, so city labels of all days in a week share one stacking context
+                                            // and a later label covers an earlier one. The size variable is set here to position the label.
                                             return (
                                                 <div
                                                     key={`${day.year}-${day.month}-${day.day}`}
-                                                    className="relative z-10 h-12 xs:h-13 sm:h-15 md:h-16 md:w-16 flex justify-center align-center items-center"
+                                                    className="relative h-12 xs:h-13 sm:h-15 md:h-16 md:w-16 xl:h-20 xl:w-20 flex justify-center align-center items-center [--weather-day-size:40px] xs:[--weather-day-size:48px] sm:[--weather-day-size:52px] md:[--weather-day-size:56px] xl:[--weather-day-size:72px]"
                                                     data-date={`${day.year}-${day.month}-${day.day}`}
                                                 >
-                                                    {/* Day cell */}
+                                                    {/* Day cell: weather art under the number */}
                                                     <div
-                                                        className={`h-10 w-10 xs:h-12 xs:w-12 sm:h-13 sm:w-13 md:h-14 md:w-14 flex items-center justify-center font-serif text-xl xs:text-2xl md:text-3xl ${bgClass} ${dayClass} ${todayClass} rounded-full transition-colors cursor-pointer`}
+                                                        className={`weather-day font-serif ${bgClass} ${dayClass} ${todayClass} ${dayWeather?.isTypical ? '[--weather-opacity:0.6]' : ''} transition-colors cursor-pointer`}
+                                                        title={dayWeather?.title}
                                                         onClick={() => handleDateClick(day.date)}
                                                     >
-                                                        {day.day}
+                                                        {dayWeather && (
+                                                            <WeatherLayer
+                                                                kind={dayWeather.kind}
+                                                                contrast={isSelectedDay ? 'on-dark' : 'on-light'}
+                                                                surface={weatherSurface}
+                                                            />
+                                                        )}
+                                                        <span className="weather-day__number">{day.day}</span>
                                                     </div>
-
-                                                    {/* Delete button for interval end dates */}
-                                                    {dateStatus.isIntervalEnd && (
+                                                    {startingInterval && startingCity && (
                                                         <button
-                                                            className="absolute -top-1 -right-1 w-4 h-4 md:w-5 md:h-5 bg-red-500 text-white rounded-full hover:bg-red-600 flex items-center justify-center cursor-pointer"
+                                                            className="absolute z-1 left-[calc(50%-var(--weather-day-size)/2-6px)] bottom-[calc(50%-var(--weather-day-size)/2-4px)] flex items-center gap-0.5 pl-0.5 pr-1.5 py-0.5 rounded-full bg-white shadow-[0_1px_4px_rgb(15_23_42/0.35)] font-sans whitespace-nowrap text-[10px] xl:text-xs leading-none text-slate-700 hover:bg-zinc-100 transition-colors cursor-pointer"
+                                                            title={`${formatCityLabel(startingCity)}: change city`}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                removeInterval(dateStatus.endIntervalId!);
-                                                            }}
-                                                        >
-                                                            <X className="w-2.5 h-2.5 md:w-3 md:h-3" />
-                                                        </button>
-                                                    )}
-
-                                                    {/* Weather icons for interval days, overlapping left to right */}
-                                                    {dayWeathers.length > 0 && (
-                                                        <div className="absolute -top-1.5 -left-1.5 flex -space-x-2">
-                                                            {dayWeathers.map(
-                                                                ({ interval, info: weatherInfo, titles }) => {
-                                                                    return (
-                                                                        <button
-                                                                            key={interval.id}
-                                                                            className="w-6 h-6 md:w-7 md:h-7 bg-white rounded-full shadow flex items-center justify-center cursor-pointer hover:bg-gray-100"
-                                                                            title={titles.join('\n')}
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                setCityPickerIntervalId(interval.id);
-                                                                            }}
-                                                                        >
-                                                                            <weatherInfo.icon
-                                                                                className={`w-4 h-4 md:w-5 md:h-5 ${weatherInfo.color}`}
-                                                                            />
-                                                                        </button>
-                                                                    );
+                                                                setCityPickerIntervalId(startingInterval.id);
+                                                                if (!isDesktop) {
+                                                                    openIntervalsSheet();
                                                                 }
-                                                            )}
-                                                        </div>
-                                                    )}
-
-                                                    {/* City button when weather is not available */}
-                                                    {endInterval && showCityButton && dayWeathers.length === 0 && (
-                                                        <button
-                                                            className="absolute -top-1.5 -left-1.5 w-6 h-6 md:w-7 md:h-7 bg-white rounded-full shadow flex items-center justify-center cursor-pointer hover:bg-gray-100"
-                                                            title={
-                                                                getIntervalCity(endInterval)?.name ?? 'Choose a city'
-                                                            }
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setCityPickerIntervalId(endInterval.id);
                                                             }}
                                                         >
-                                                            <MapPin className="w-4 h-4 md:w-5 md:h-5 text-slate-500" />
+                                                            <MapPin className="w-3 h-3 xl:w-3.5 xl:h-3.5 flex-shrink-0 text-slate-500" />
+                                                            {startingCity.name}
                                                         </button>
-                                                    )}
-
-                                                    {/* City picker for the interval */}
-                                                    {endInterval && isCityPickerOpen && (
-                                                        <CityPicker
-                                                            currentCity={getIntervalCity(endInterval)}
-                                                            align={dayIndex >= 4 ? 'right' : 'left'}
-                                                            onSelect={(city) => handleCitySelect(endInterval.id, city)}
-                                                            onClose={closeCityPicker}
-                                                        />
                                                     )}
                                                 </div>
                                             );
@@ -936,39 +1097,36 @@ export function ContinuousCalendar() {
                     </div>
                 </div>
 
-                {/* Month sidebar - desktop only */}
-                <div className="hidden md:block w-24 flex-shrink-0 relative">
-                    {/* Past dates button for desktop */}
-                    {hiddenWeeksCount > 0 && !showPastDates && (
-                        <button
-                            onClick={() => setShowPastDates(true)}
-                            className="absolute left-0 -top-12 inline-flex items-center justify-center -ml-3 pl-3 pr-4 py-1.5 bg-sky-50 text-gray-700 rounded hover:bg-sky-100 hover:text-blue-600 transition-colors text-sm font-medium font-serif z-40 cursor-pointer"
-                        >
-                            ↑ Past
-                        </button>
-                    )}
-
-                    {monthPositions
-                        .filter((monthPos) => !shouldHideWeek(weeks[monthPos.weekIndex]))
-                        .map((monthPos) => (
-                            <div
-                                key={`${monthPos.year}-${monthPos.monthName}`}
-                                data-month={`${monthPos.year}-${monthPos.monthName}`}
-                                data-week={`${monthPos.weekIndex}`}
-                                className="absolute left-0 h-16 flex flex-col items-start justify-center font-serif cursor-pointer"
-                                style={{
-                                    top: `${(monthPos.weekIndex - hiddenWeeksCount) * 64}px`, // 64px (md:h-16) + 2px (mb-2) per week row + offset
-                                }}
-                                onClick={() => handleMonthClick(monthPos.year, monthPos.monthName)}
-                            >
-                                <div className="text-sm font-medium text-gray-700 hover:text-blue-600 transition-colors">
-                                    {monthPos.monthName}
-                                </div>
-                                <div className="text-xs text-gray-500">{monthPos.year}</div>
-                            </div>
-                        ))}
-                </div>
+                {/* Intervals panel - wide screens only */}
+                <aside className="hidden lg:block w-72 flex-shrink-0">
+                    <div className="sticky top-14 max-h-[calc(100vh-4.5rem)] overflow-y-auto px-1 pb-4">
+                        {isDesktop && intervalsPanel}
+                    </div>
+                </aside>
             </div>
+
+            {/* Floating button with intervals sheet - narrow screens */}
+            {!isDesktop && !showIntervalsSheet && (
+                <button
+                    className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-slate-800 text-white shadow-lg flex items-center justify-center hover:bg-slate-700 transition-colors cursor-pointer"
+                    title="Intervals and weather"
+                    aria-label="Intervals and weather"
+                    onClick={openIntervalsSheet}
+                >
+                    <CalendarRange className="w-6 h-6" />
+                    {intervals.length > 0 && (
+                        <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-600 text-xs font-medium flex items-center justify-center">
+                            {intervals.length}
+                        </span>
+                    )}
+                </button>
+            )}
+
+            {!isDesktop && (
+                <BottomSheet open={showIntervalsSheet} title="Weather & intervals" onClose={closeIntervalsSheet}>
+                    {intervalsPanel}
+                </BottomSheet>
+            )}
         </div>
     );
 }
