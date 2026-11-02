@@ -19,9 +19,11 @@ import {
     loadDefaultCity,
     loadKnownCities,
     loadRecentCities,
+    loadShowTemperature,
     loadWeatherUntilHorizon,
     saveDefaultCity,
     saveRecentCities,
+    saveShowTemperature,
     type TypicalWeather,
     type WeatherByDate,
 } from '@/services/weather';
@@ -419,6 +421,8 @@ interface DayWeatherView {
     kind: WeatherKind;
     isTypical: boolean;
     title: string;
+    tMax: number; // Rounded, NaN if unknown
+    tMin: number;
 }
 
 interface WeatherSources {
@@ -473,11 +477,16 @@ const getDayWeather = (
     return {
         kind,
         isTypical: !!dayWeather.isTypical,
+        tMax: Math.round(dayWeather.tMax),
+        tMin: Math.round(dayWeather.tMin),
         title: dayWeather.isTypical
             ? `${city.name}, typical weather: ${WEATHER_LABELS[kind]}, ${temperature}`
             : `${city.name}: ${WEATHER_LABELS[kind]}, ${temperature}`,
     };
 };
+
+// Temperature with a real minus sign
+const formatTemperature = (temperature: number): string => `${temperature < 0 ? '−' : ''}${Math.abs(temperature)}°`;
 
 // Day is the chosen start of a new interval or lies in an interval
 const isDaySelected = (date: Date, selectedStart: Date | null, intervals: DateInterval[]): boolean =>
@@ -504,6 +513,8 @@ interface DayCellProps {
     weatherKind: WeatherKind | null;
     isTypicalWeather: boolean;
     weatherTitle: string | undefined;
+    tMax: number; // Day and night temperature, NaN if unknown
+    tMin: number;
     startingIntervalId: string | null; // Interval with a city starting on this day
     startingCity: City | null;
     isCityPickerOpen: boolean;
@@ -520,6 +531,8 @@ const DayCell = memo(function DayCell({
     weatherKind,
     isTypicalWeather,
     weatherTitle,
+    tMax,
+    tMin,
     startingIntervalId,
     startingCity,
     isCityPickerOpen,
@@ -542,20 +555,28 @@ const DayCell = memo(function DayCell({
 
     // Determine background colors based on selection status
     let bgClass = 'bg-zinc-50 hover:bg-zinc-100';
+    // Halo of the temperature has the color of the circle, so it stands out from the weather art
+    let haloClass = '[--temperature-halo:var(--color-zinc-50)]';
+    // Temperature is lighter on light circles
+    const temperatureClass = isSelectedDay ? '' : '[--temperature-opacity:0.8]';
     // Waves have the color of the circle
     let pulseClass = 'text-zinc-300';
     if (isSelectedDay) {
         if (isOffDay || day.isVacation) {
             bgClass = 'bg-red-600 hover:bg-red-700';
+            haloClass = '[--temperature-halo:var(--color-red-600)]';
             pulseClass = 'text-red-600';
         } else {
             bgClass = 'bg-slate-600 hover:bg-slate-700';
+            haloClass = '[--temperature-halo:var(--color-slate-600)]';
             pulseClass = 'text-slate-600';
         }
     } else if (day.isVacation) {
         bgClass = 'bg-orange-50 hover:bg-orange-100';
+        haloClass = '[--temperature-halo:var(--color-orange-50)]';
     } else if (isOffDay) {
         bgClass = 'bg-rose-50 hover:bg-rose-100';
+        haloClass = '[--temperature-halo:var(--color-rose-50)]';
     }
 
     // Check if today - add ring based on day type and selection
@@ -582,7 +603,7 @@ const DayCell = memo(function DayCell({
             )}
             {/* Day cell: weather art under the number */}
             <div
-                className={`weather-day font-serif ${bgClass} ${dayClass} ${todayClass} ${isTypicalWeather ? '[--weather-opacity:0.6]' : ''} transition-colors cursor-pointer`}
+                className={`weather-day font-serif ${bgClass} ${haloClass} ${temperatureClass} ${dayClass} ${todayClass} ${isTypicalWeather ? '[--weather-opacity:0.6]' : ''} transition-colors cursor-pointer`}
                 title={weatherTitle}
                 onClick={() => onDateClick(day.date)}
             >
@@ -594,6 +615,12 @@ const DayCell = memo(function DayCell({
                     />
                 )}
                 <span className="weather-day__number">{day.day}</span>
+                {!Number.isNaN(tMax) && !Number.isNaN(tMin) && (
+                    <span className="weather-day__temperature" aria-hidden="true">
+                        {formatTemperature(tMax)}
+                        <span className="weather-day__night"> {formatTemperature(tMin)}</span>
+                    </span>
+                )}
             </div>
             <CityLabel
                 intervalId={startingIntervalId}
@@ -615,6 +642,7 @@ interface CalendarGridProps {
     weatherByDay: Map<number, DayWeatherView>; // Keyed by date time
     todayTime: number;
     pulse: DayPulse | null;
+    showTemperature: boolean;
     onDateClick: (date: Date) => void;
     onCityLabelClick: (intervalId: string) => void;
     onMonthClick: (year: number, monthName: string) => void;
@@ -632,6 +660,7 @@ const CalendarGrid = memo(function CalendarGrid({
     weatherByDay,
     todayTime,
     pulse,
+    showTemperature,
     onDateClick,
     onCityLabelClick,
     onMonthClick,
@@ -696,6 +725,8 @@ const CalendarGrid = memo(function CalendarGrid({
                                             weatherKind={dayWeather?.kind ?? null}
                                             isTypicalWeather={!!dayWeather?.isTypical}
                                             weatherTitle={dayWeather?.title}
+                                            tMax={showTemperature ? (dayWeather?.tMax ?? NaN) : NaN}
+                                            tMin={showTemperature ? (dayWeather?.tMin ?? NaN) : NaN}
                                             startingIntervalId={startingCity ? startingInterval!.id : null}
                                             startingCity={startingCity}
                                             isCityPickerOpen={
@@ -726,6 +757,7 @@ export function ContinuousCalendar() {
     const [shouldScrollToFirst, setShouldScrollToFirst] = useState(false);
     const [shouldScrollToMonth, setShouldScrollToMonth] = useState<string | null>(null);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [showTemperature, setShowTemperature] = useState(loadShowTemperature);
     const [showVacations, setShowVacations] = useState(() => new URLSearchParams(window.location.search).has('vc'));
     // Earlier weeks are hidden behind the "Past" button, their weather is not loaded
     const [visibleFrom, setVisibleFrom] = useState(getInitialVisibleFrom);
@@ -1402,29 +1434,46 @@ export function ContinuousCalendar() {
             isSettingsOpen={isSettingsOpen}
             onToggleSettings={() => setIsSettingsOpen((isOpen) => !isOpen)}
             settings={
-                <label className="flex items-start gap-3 cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={showVacations}
-                        onChange={(e) => {
-                            setShowVacations(e.target.checked);
-                            const urlParams = new URLSearchParams(window.location.search);
-                            if (e.target.checked) {
-                                urlParams.set('vc', 'true');
-                            } else {
-                                urlParams.delete('vc');
-                            }
-                            const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
-                            window.history.replaceState(window.history.state, '', newUrl);
-                            rememberURL();
-                        }}
-                        className="w-4 h-4 mt-0.5 flex-shrink-0 accent-blue-600 cursor-pointer"
-                    />
-                    <span>
-                        <span className="block text-sm text-slate-700">Show vacations</span>
-                        <span className="block text-xs text-gray-500">School vacation periods in orange</span>
-                    </span>
-                </label>
+                <div className="space-y-3">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={showVacations}
+                            onChange={(e) => {
+                                setShowVacations(e.target.checked);
+                                const urlParams = new URLSearchParams(window.location.search);
+                                if (e.target.checked) {
+                                    urlParams.set('vc', 'true');
+                                } else {
+                                    urlParams.delete('vc');
+                                }
+                                const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
+                                window.history.replaceState(window.history.state, '', newUrl);
+                                rememberURL();
+                            }}
+                            className="w-4 h-4 mt-0.5 flex-shrink-0 accent-blue-600 cursor-pointer"
+                        />
+                        <span>
+                            <span className="block text-sm text-slate-700">Show vacations</span>
+                            <span className="block text-xs text-gray-500">School vacation periods in orange</span>
+                        </span>
+                    </label>
+                    <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={showTemperature}
+                            onChange={(e) => {
+                                setShowTemperature(e.target.checked);
+                                saveShowTemperature(e.target.checked);
+                            }}
+                            className="w-4 h-4 mt-0.5 flex-shrink-0 accent-blue-600 cursor-pointer"
+                        />
+                        <span>
+                            <span className="block text-sm text-slate-700">Show temperature</span>
+                            <span className="block text-xs text-gray-500">Day and night, on wide screens</span>
+                        </span>
+                    </label>
+                </div>
             }
             onShow={(interval) => {
                 if (showIntervalsSheet) {
@@ -1479,6 +1528,7 @@ export function ContinuousCalendar() {
                         weatherByDay={weatherByDay}
                         todayTime={todayTime}
                         pulse={pulse}
+                        showTemperature={showTemperature}
                         onDateClick={onDateClick}
                         onCityLabelClick={onCityLabelClick}
                         onMonthClick={onMonthClick}

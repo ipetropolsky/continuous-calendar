@@ -42,6 +42,7 @@ const RECENT_CITIES_STORAGE_KEY = 'recentCities';
 const DEFAULT_CITY_STORAGE_KEY = 'defaultCity';
 // Cities looked up by id, so cities from the URL are known before the first render on the next visits
 const KNOWN_CITIES_STORAGE_KEY = 'knownCities';
+const SHOW_TEMPERATURE_STORAGE_KEY = 'showTemperature';
 const KNOWN_CITIES_LIMIT = 500; // ~150 bytes each
 const RECENT_CITIES_LIMIT = 5;
 
@@ -508,3 +509,9 @@ const saveKnownCity = (city: City) =>
         KNOWN_CITIES_STORAGE_KEY,
         [...loadKnownCities().filter(({ id }) => id !== city.id), city].slice(-KNOWN_CITIES_LIMIT)
     );
+
+// Temperature in the day circles, off by default
+export const loadShowTemperature = (): boolean => loadJSON<boolean>(SHOW_TEMPERATURE_STORAGE_KEY) ?? false;
+
+export const saveShowTemperature = (showTemperature: boolean) =>
+    saveJSON(SHOW_TEMPERATURE_STORAGE_KEY, showTemperature);

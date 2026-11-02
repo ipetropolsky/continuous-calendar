@@ -54,3 +54,35 @@
 /* cqi follows the circle's actual width, including a narrow parent. */
 /* No text-size breakpoints, pixel offsets, transforms or central masks. */
 /* Keep today/focus rings and action buttons outside the clipped artwork. */
+
+/* Day and night temperature: a quiet line centered above the number (the city label covers the bottom),
+   hidden in small circles */
+.weather-day__temperature {
+    position: absolute;
+    z-index: 1;
+    inset-inline: 0;
+    top: 10cqi;
+    font-family: var(--font-sans);
+    font-size: 12.5cqi;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    text-shadow:
+        0 0 1px var(--temperature-halo, white),
+        0 0 2px var(--temperature-halo, white),
+        0 0 3px var(--temperature-halo, white);
+    opacity: calc(0.75 * var(--temperature-opacity, 1));
+    pointer-events: none;
+}
+
+/* Relative to the day temperature: 0.5 in total */
+.weather-day__night {
+    opacity: 0.67;
+}
+
+@container (inline-size < 72px) {
+    .weather-day__temperature {
+        display: none;
+    }
+}

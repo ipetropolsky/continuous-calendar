@@ -81,6 +81,7 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 - Each interval has its own city, shown as a label with a pin in the bottom-left corner of its first day (not truncated, continues to the right, a later label covers an earlier one; click opens the city picker). A day shows the weather of the interval that starts later (ends later if both start on the same day); days without interval weather show the default city weather (whole calendar range)
 - Weather art is drawn inside the day circle under the number by `src/components/weather/WeatherLayer.tsx` (from weather-svg-kit v8): WMO code → `WeatherKind` in `weatherPresentation.ts`, trusted inline SVG geometry in `weatherScenes.ts`, opacity via CSS variables in `weather-opacity.css`. Scenes are rendered once as `<symbol>` by `WeatherSymbols` (mounted in `ContinuousCalendar`), days reference them with `<use>`; opacity rules must stay plain class selectors, because the symbol content doesn't match selectors through the `<use>` host (CSS variables are inherited from it)
 - Day circle uses `.weather-day` sized by `--weather-day-size` (40/48/52/56/72px, xl cells are 80px), number size is `53cqi`; today is marked with a pink outline as in the kit preview; don't add width/height/text-size classes to it
+- Temperature (setting "Show temperature", off by default, `showTemperature` in localStorage): a quiet line centered above the number (day, then lighter night), so the city label doesn't cover it (`.weather-day__temperature` in `weather-day.css`, night is lighter, real minus sign, a halo of the circle color `--temperature-halo` separates it from the art, 20% lighter on unselected days via `--temperature-opacity`), shown only in 72px circles (container query), the full text is in the day title
 - `surface`: `selected-off` for selected weekends/holidays/vacations, `vacation` for unselected vacation weekdays; `contrast` is `on-dark` for selected days
 - localStorage: `defaultCity`, `recentCities` (last 5 chosen, the first one is the city of new intervals; legacy `lastCity` is migrated), `knownCities` (last 500 cities looked up by id, so cities from the URL are known before the first render on the next visits). While a city from the URL is being looked up, the panel shows a placeholder instead of "Choose a city" (`loadingCityIds`)
 
@@ -101,6 +102,7 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 - The last block of `IntervalsPanel` (desktop panel and mobile sheet): collapsed by default, the button with a chevron expands/collapses settings in place with animation (`isSettingsOpen` lives in `ContinuousCalendar`)
 - Toggle for showing vacation dates (orange highlight, including weekends; selected vacations look like selected weekends)
 - Updates `vc` URL parameter
+- Toggle for showing day and night temperature in the day circles (off by default, stored in localStorage `showTemperature`, not in the URL)
 
 ## Development Commands
 
