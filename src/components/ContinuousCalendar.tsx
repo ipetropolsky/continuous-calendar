@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { CalendarRange, MapPin, Settings, X } from 'lucide-react';
 
 import { BottomSheet } from '@/components/BottomSheet';
-import { type IntervalItem, IntervalsPanel } from '@/components/IntervalsPanel';
+import { type IntervalItem, IntervalsPanel, PendingIntervalCard } from '@/components/IntervalsPanel';
 import { WeatherLayer } from '@/components/weather/WeatherLayer';
 import { getWeatherKind, WEATHER_LABELS, type WeatherKind } from '@/components/weather/weatherPresentation';
 import { calendarConfig, holidayDates, vacationDates } from '@/config/calendarConfig';
@@ -574,6 +574,20 @@ export function ContinuousCalendar() {
         return () => window.removeEventListener('popstate', handlePopState);
     }, [hideSheet, showSheet, showSettingsModal, hideSettingsModal]);
 
+    // Cancel the interval selection on Esc if nothing is open over the calendar
+    useEffect(() => {
+        if (!selectedStart || showSettings || showIntervalsSheet || cityPickerIntervalId) {
+            return;
+        }
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setSelectedStart(null);
+            }
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [selectedStart, showSettings, showIntervalsSheet, cityPickerIntervalId]);
+
     // Close settings or the sheet on Esc if no city picker is open (the picker handles Esc itself)
     useEffect(() => {
         if (!(showSettings || showIntervalsSheet) || cityPickerIntervalId) {
@@ -914,6 +928,8 @@ export function ContinuousCalendar() {
     const intervalsPanel = (
         <IntervalsPanel
             intervals={intervalItems}
+            pendingStart={selectedStart}
+            onCancelPending={() => setSelectedStart(null)}
             defaultCity={defaultCity}
             recentCities={recentCities}
             cityPickerIntervalId={cityPickerIntervalId}
@@ -936,20 +952,15 @@ export function ContinuousCalendar() {
     return (
         <div className="w-full max-w-7xl mx-auto py-8 md:p-8 overflow-x-clip">
             <div className="flex gap-8 justify-center px-8 mb-2">
-                <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] xl:w-[560px] flex justify-between">
-                    <div className="flex-1 flex flex-col md:items-center">
-                        <h1 className="text-2xl md:text-3xl font-bold font-serif md:mb-1">Continuous Calendar</h1>
-                        <p className="text-gray-500 font-serif">2026 — 2027</p>
-                    </div>
-                    <div className="flex items-center">
-                        <button
-                            className="p-2 text-gray-500 hover:text-gray-700 transition-colors rounded-full hover:bg-gray-100"
-                            aria-label="Settings"
-                            onClick={openSettings}
-                        >
-                            <Settings className="w-5 h-5" />
-                        </button>
-                    </div>
+                <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] xl:w-[560px] flex justify-between items-center gap-2">
+                    <h1 className="text-2xl md:text-3xl font-bold font-serif">Continuous Calendar</h1>
+                    <button
+                        className="-mr-2 p-2 text-gray-500 hover:text-gray-700 transition-colors rounded-full hover:bg-gray-100 cursor-pointer"
+                        aria-label="Settings"
+                        onClick={openSettings}
+                    >
+                        <Settings className="w-7 h-7" />
+                    </button>
                 </div>
                 <div className="hidden lg:block w-72 flex-shrink-0" />
             </div>
@@ -1044,7 +1055,7 @@ export function ContinuousCalendar() {
                         {hiddenWeeksCount > 0 && (
                             <button
                                 onClick={showMorePast}
-                                className="absolute -left-1 -top-22 -translate-x-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-700 hover:text-blue-500 transition-colors bg-sky-50 hover:bg-sky-100 rounded p-1 z-20"
+                                className="absolute -left-1 -top-22 -translate-x-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-700 hover:text-blue-500 transition-colors bg-sky-50 hover:bg-sky-100 rounded p-1 z-20 cursor-pointer"
                             >
                                 Past →
                             </button>
@@ -1210,6 +1221,15 @@ export function ContinuousCalendar() {
                         </span>
                     )}
                 </button>
+            )}
+
+            {/* Pending interval hint next to the floating button - narrow screens */}
+            {!isDesktop && !showIntervalsSheet && selectedStart && (
+                <PendingIntervalCard
+                    start={selectedStart}
+                    onCancel={() => setSelectedStart(null)}
+                    className="fixed bottom-6 left-4 right-24 z-40 min-h-14 flex items-center bg-white shadow-lg"
+                />
             )}
 
             {!isDesktop && (

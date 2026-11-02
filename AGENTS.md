@@ -25,6 +25,7 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 - Intervals stored in state as `DateInterval[]` with unique IDs
 - Visual highlighting with different colors for working days/holidays/vacations
 - Delete button on interval end dates
+- After the first click `PendingIntervalCard` (start date, "Choose the end date" hint, cancel button, no city controls) is shown in the intervals panel at the position of the future interval; on narrow screens it floats at the bottom next to the floating button. Esc cancels the selection
 
 ### URL Parameter System
 

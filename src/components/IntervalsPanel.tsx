@@ -1,4 +1,6 @@
-import { MapPin, Trash2 } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+
+import { MapPin, Trash2, X } from 'lucide-react';
 
 import { CityPicker } from '@/components/CityPicker';
 import type { City } from '@/services/weather';
@@ -15,6 +17,8 @@ export const DEFAULT_CITY_PICKER_ID = 'default-city';
 
 interface IntervalsPanelProps {
     intervals: IntervalItem[];
+    pendingStart: Date | null; // Start of the interval being selected
+    onCancelPending: () => void;
     defaultCity: City | null;
     recentCities: City[];
     cityPickerIntervalId: string | null;
@@ -44,10 +48,47 @@ const formatRange = (start: Date, end: Date): string => {
     return `${formatDay(start, start.getFullYear() !== end.getFullYear())} – ${formatDay(end, true)}`;
 };
 
+interface PendingIntervalCardProps {
+    start: Date;
+    onCancel: () => void;
+    className?: string;
+    shouldReveal?: boolean; // Scroll the panel to the card when it appears
+}
+
+// Interval with the chosen start date, waiting for the end date. `className` must set the position (relative/fixed)
+export function PendingIntervalCard({ start, onCancel, className = '', shouldReveal }: PendingIntervalCardProps) {
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (shouldReveal) {
+            ref.current?.scrollIntoView({ block: 'nearest' });
+        }
+    }, [shouldReveal]);
+
+    return (
+        <div ref={ref} className={`rounded-xl font-sans ${className}`}>
+            <div className="pl-3 pr-14 py-3">
+                <div className="font-serif font-medium text-slate-800">{formatDay(start, true)} – …</div>
+                <div className="text-xs text-blue-700">Choose the end date in the calendar</div>
+            </div>
+            <button
+                className={`absolute inset-y-0 right-0 w-12 flex items-center justify-center rounded-r-xl text-gray-400 hover:text-slate-700 hover:bg-black/5 ${FOCUS_CLASS} transition-colors cursor-pointer`}
+                title="Cancel"
+                aria-label="Cancel interval selection"
+                onClick={onCancel}
+            >
+                <X className="w-4 h-4" />
+            </button>
+        </div>
+    );
+}
+
 const getDaysCount = (start: Date, end: Date): number => Math.round((end.getTime() - start.getTime()) / DAY_MS) + 1;
 
 export function IntervalsPanel({
     intervals,
+    pendingStart,
+    onCancelPending,
     defaultCity,
     recentCities,
     cityPickerIntervalId,
@@ -58,6 +99,19 @@ export function IntervalsPanel({
     onRemove,
     onShow,
 }: IntervalsPanelProps) {
+    // The pending interval is shown where it will be after the end date is chosen
+    const pendingIndex = pendingStart ? intervals.filter((interval) => interval.startDate <= pendingStart).length : -1;
+    const pendingItem = pendingStart && (
+        <li key="pending">
+            <PendingIntervalCard
+                start={pendingStart}
+                onCancel={onCancelPending}
+                shouldReveal
+                className="relative bg-blue-50 ring-1 ring-inset ring-blue-200"
+            />
+        </li>
+    );
+
     return (
         <div className="space-y-6 font-sans">
             <section>
@@ -90,13 +144,14 @@ export function IntervalsPanel({
 
             <section>
                 <h3 className="mb-2 text-sm font-medium text-gray-700">Intervals</h3>
-                {intervals.length === 0 ? (
+                {intervals.length === 0 && !pendingStart ? (
                     <p className="text-sm text-gray-500">Click two dates in the calendar to select an interval.</p>
                 ) : (
                     <ul className="space-y-2">
-                        {intervals.map((interval) => {
+                        {pendingIndex === 0 && pendingItem}
+                        {intervals.map((interval, index) => {
                             const daysCount = getDaysCount(interval.startDate, interval.endDate);
-                            return (
+                            return [
                                 <li key={interval.id} className="rounded-xl bg-zinc-50">
                                     {/* Delete button lies over the right part of the full-width header */}
                                     <div className="relative">
@@ -144,8 +199,9 @@ export function IntervalsPanel({
                                             />
                                         </div>
                                     )}
-                                </li>
-                            );
+                                </li>,
+                                pendingIndex === index + 1 && pendingItem,
+                            ];
                         })}
                     </ul>
                 )}
