@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-import { CalendarRange, MapPin, Settings, X } from 'lucide-react';
+import { CalendarRange, MapPin } from 'lucide-react';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { type IntervalItem, IntervalsPanel, PendingIntervalCard } from '@/components/IntervalsPanel';
@@ -45,7 +45,7 @@ const DESKTOP_PANEL_MEDIA = '(min-width: 64rem)';
 
 // Overlays have their own paths, so the system "Back" gesture closes them
 const BASE_PATH = import.meta.env.BASE_URL;
-const OVERLAYS = ['intervals', 'settings'] as const;
+const OVERLAYS = ['intervals'] as const;
 type Overlay = (typeof OVERLAYS)[number];
 
 const getOverlay = (): Overlay | null => {
@@ -152,8 +152,7 @@ export function ContinuousCalendar() {
     const [selectedStart, setSelectedStart] = useState<Date | null>(null);
     const [shouldScrollToFirst, setShouldScrollToFirst] = useState(false);
     const [shouldScrollToMonth, setShouldScrollToMonth] = useState<string | null>(null);
-    const [showSettings, setShowSettings] = useState(false);
-    const [settingsVisible, setSettingsVisible] = useState(false);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [showVacations, setShowVacations] = useState(false);
     // Earlier weeks are hidden behind the "Past" button, their weather is not loaded
     const [visibleFrom, setVisibleFrom] = useState(getDefaultVisibleFrom);
@@ -190,16 +189,6 @@ export function ContinuousCalendar() {
         setCityPickerIntervalId(null);
     }, []);
 
-    // Settings modal: mounted flag and visibility flag for the fade animation
-    const showSettingsModal = useCallback(() => {
-        setShowSettings(true);
-        setTimeout(() => setSettingsVisible(true), 10);
-    }, []);
-
-    const hideSettingsModal = useCallback(() => {
-        setSettingsVisible(false);
-        setTimeout(() => setShowSettings(false), 200);
-    }, []);
     const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_PANEL_MEDIA).matches);
     const desktopPanelRef = useRef<HTMLDivElement>(null);
 
@@ -564,19 +553,14 @@ export function ContinuousCalendar() {
             } else {
                 hideSheet();
             }
-            if (overlay === 'settings') {
-                showSettingsModal();
-            } else {
-                hideSettingsModal();
-            }
         };
         window.addEventListener('popstate', handlePopState);
         return () => window.removeEventListener('popstate', handlePopState);
-    }, [hideSheet, showSheet, showSettingsModal, hideSettingsModal]);
+    }, [hideSheet, showSheet]);
 
     // Cancel the interval selection on Esc if nothing is open over the calendar
     useEffect(() => {
-        if (!selectedStart || showSettings || showIntervalsSheet || cityPickerIntervalId) {
+        if (!selectedStart || showIntervalsSheet || cityPickerIntervalId) {
             return;
         }
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -586,20 +570,15 @@ export function ContinuousCalendar() {
         };
         document.addEventListener('keydown', handleKeyDown);
         return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [selectedStart, showSettings, showIntervalsSheet, cityPickerIntervalId]);
+    }, [selectedStart, showIntervalsSheet, cityPickerIntervalId]);
 
-    // Close settings or the sheet on Esc if no city picker is open (the picker handles Esc itself)
+    // Close the sheet on Esc if no city picker is open (the picker handles Esc itself)
     useEffect(() => {
-        if (!(showSettings || showIntervalsSheet) || cityPickerIntervalId) {
+        if (!showIntervalsSheet || cityPickerIntervalId) {
             return;
         }
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key !== 'Escape') {
-                return;
-            }
-            if (showSettings) {
-                closeSettings();
-            } else {
+            if (e.key === 'Escape') {
                 closeIntervalsSheet();
             }
         };
@@ -778,17 +757,6 @@ export function ContinuousCalendar() {
         }
     };
 
-    const openSettings = () => {
-        enterOverlayPath('settings');
-        showSettingsModal();
-    };
-
-    const closeSettings = () => {
-        if (!leaveOverlayPath()) {
-            hideSettingsModal();
-        }
-    };
-
     const handleCitySelect = (intervalId: string, city: City) => {
         rememberCity(city);
         setCityPickerIntervalId(null);
@@ -938,6 +906,33 @@ export function ContinuousCalendar() {
             onCloseCityPicker={closeCityPicker}
             onCitySelect={handleCitySelect}
             onRemove={removeInterval}
+            isSettingsOpen={isSettingsOpen}
+            onToggleSettings={() => setIsSettingsOpen((isOpen) => !isOpen)}
+            settings={
+                <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={showVacations}
+                        onChange={(e) => {
+                            setShowVacations(e.target.checked);
+                            const urlParams = new URLSearchParams(window.location.search);
+                            if (e.target.checked) {
+                                urlParams.set('vc', 'true');
+                            } else {
+                                urlParams.delete('vc');
+                            }
+                            const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
+                            window.history.replaceState(window.history.state, '', newUrl);
+                            rememberURL();
+                        }}
+                        className="w-4 h-4 mt-0.5 flex-shrink-0 accent-blue-600 cursor-pointer"
+                    />
+                    <span>
+                        <span className="block text-sm text-slate-700">Show vacations</span>
+                        <span className="block text-xs text-gray-500">School vacation periods in orange</span>
+                    </span>
+                </label>
+            }
             onShow={(interval) => {
                 if (showIntervalsSheet) {
                     closeIntervalsSheet();
@@ -950,82 +945,15 @@ export function ContinuousCalendar() {
     const hiddenWeeksCount = weeks.reduce((result, week) => result + (shouldHideWeek(week) ? 1 : 0), 0);
 
     return (
-        <div className="w-full max-w-7xl mx-auto py-8 md:p-8 overflow-x-clip">
+        <div className="w-full max-w-7xl mx-auto pt-4 pb-8 md:px-8 md:pt-6 overflow-x-clip">
             <div className="flex gap-8 justify-center px-8 mb-2">
-                <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] xl:w-[560px] flex justify-between items-center gap-2">
-                    <h1 className="text-2xl md:text-3xl font-bold font-serif">Continuous Calendar</h1>
-                    <button
-                        className="-mr-2 p-2 text-gray-500 hover:text-gray-700 transition-colors rounded-full hover:bg-gray-100 cursor-pointer"
-                        aria-label="Settings"
-                        onClick={openSettings}
-                    >
-                        <Settings className="w-7 h-7" />
-                    </button>
+                <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] xl:w-[560px] ">
+                    <h1 className="text-2xl md:text-4xl xl:text-5xl font-bold font-serif md:text-center">
+                        Continuous Calendar
+                    </h1>
                 </div>
                 <div className="hidden lg:block w-72 flex-shrink-0" />
             </div>
-
-            {/* Settings Modal */}
-            {showSettings && (
-                <div
-                    className={`fixed inset-0 flex items-center justify-center z-50 transition-all duration-200 ease-in-out ${
-                        settingsVisible ? 'bg-black/75' : 'bg-black/0'
-                    }`}
-                    onClick={closeSettings}
-                >
-                    <div
-                        className={`bg-white rounded-xl shadow-2xl p-8 w-full max-w-md mx-4 transform transition-all duration-200 ease-in-out ${
-                            settingsVisible ? 'scale-100 opacity-100' : 'scale-95 opacity-0'
-                        }`}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-2xl font-semibold text-gray-800">Settings</h2>
-                            <button
-                                className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition-colors"
-                                aria-label="Close"
-                                onClick={closeSettings}
-                            >
-                                <X className="w-6 h-6" />
-                            </button>
-                        </div>
-
-                        <div className="space-y-6">
-                            <div className="border-b border-gray-100 pb-4">
-                                <h3 className="text-lg font-medium text-gray-700 mb-3">Display Options</h3>
-                                <label className="flex items-start space-x-4 cursor-pointer group">
-                                    <input
-                                        type="checkbox"
-                                        checked={showVacations}
-                                        onChange={(e) => {
-                                            setShowVacations(e.target.checked);
-                                            // Update URL parameter
-                                            const urlParams = new URLSearchParams(window.location.search);
-                                            if (e.target.checked) {
-                                                urlParams.set('vc', 'true');
-                                            } else {
-                                                urlParams.delete('vc');
-                                            }
-                                            const newUrl = `${window.location.pathname}${urlParams.toString() ? '?' + urlParams.toString() : ''}`;
-                                            window.history.replaceState(window.history.state, '', newUrl);
-                                            rememberURL();
-                                        }}
-                                        className="w-5 h-5 mt-1 text-blue-600 border-2 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
-                                    />
-                                    <div className="flex flex-col">
-                                        <span className="text-gray-700 font-medium group-hover:text-gray-900 transition-colors">
-                                            Show vacations
-                                        </span>
-                                        <span className="text-sm text-gray-500">
-                                            Display school vacation periods in orange
-                                        </span>
-                                    </div>
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* Sticky week day headers - responsive width */}
             <div className="sticky top-0 bg-white z-20 px-8 pt-2 mb-4">
@@ -1068,7 +996,7 @@ export function ContinuousCalendar() {
                             return (
                                 <div
                                     key={weekIndex}
-                                    className={`relative z-10 transition-all duration-500 ease-in-out ${
+                                    className={`relative z-10 transition-[max-height,opacity] duration-500 ease-in-out ${
                                         shouldHideWeek(week)
                                             ? 'max-h-0 overflow-hidden mb-0 opacity-0'
                                             : 'max-h-[10000px] opacity-100 mb-2 md:mb-0'

@@ -86,7 +86,7 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 
 - `IntervalsPanel`: default city and the list of intervals with city picker, delete and scroll-to-interval
 - Wide screens (`min-width: 64rem`): sticky column on the right; narrow screens: floating button opens `BottomSheet` (full-screen, slides from the bottom, closes with swipe down anywhere unless inner content is scrolled)
-- Open sheet and settings have their own paths `${BASE_URL}intervals` / `${BASE_URL}settings` (pushState), so system "Back" closes them; `rememberURL()` must be called after every history write, so search params stay in sync between the overlay entry and the page entry
+- Open sheet has its own path `${BASE_URL}intervals` (pushState), so system "Back" closes it; `rememberURL()` must be called after every history write, so search params stay in sync between the overlay entry and the page entry
 - Any other path on load (including overlay paths after a reload) is replaced with `${BASE_URL}`, keeping search params; on GitHub Pages `404.html` (second build input, `%BASE_URL%` is substituted by Vite) redirects unknown paths to the app
 - `CityPicker`: expands with animation, keyboard: arrows move focus between input and cities, Enter/Space select, Esc closes, Tab out closes; focus returns to the opener
 - Only one panel instance is mounted at a time (`isDesktop` via `matchMedia`), otherwise `CityPicker` outside-click handlers conflict
@@ -94,6 +94,7 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 
 ### Settings
 
+- The last block of `IntervalsPanel` (desktop panel and mobile sheet): collapsed by default, the button with a chevron expands/collapses settings in place with animation (`isSettingsOpen` lives in `ContinuousCalendar`)
 - Toggle for showing vacation dates (orange highlight, including weekends; selected vacations look like selected weekends)
 - Updates `vc` URL parameter
 

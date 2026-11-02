@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 
-import { MapPin, Trash2, X } from 'lucide-react';
+import { ChevronRight, MapPin, Settings, Trash2, X } from 'lucide-react';
 
 import { CityPicker } from '@/components/CityPicker';
 import type { City } from '@/services/weather';
@@ -28,6 +28,9 @@ interface IntervalsPanelProps {
     onCitySelect: (intervalId: string, city: City) => void;
     onRemove: (intervalId: string) => void;
     onShow: (interval: IntervalItem) => void;
+    isSettingsOpen: boolean;
+    onToggleSettings: () => void;
+    settings: ReactNode;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -98,6 +101,9 @@ export function IntervalsPanel({
     onCitySelect,
     onRemove,
     onShow,
+    isSettingsOpen,
+    onToggleSettings,
+    settings,
 }: IntervalsPanelProps) {
     // The pending interval is shown where it will be after the end date is chosen
     const pendingIndex = pendingStart ? intervals.filter((interval) => interval.startDate <= pendingStart).length : -1;
@@ -205,6 +211,34 @@ export function IntervalsPanel({
                         })}
                     </ul>
                 )}
+            </section>
+
+            <section className="rounded-xl bg-zinc-50">
+                <button
+                    className={`group w-full p-3 flex items-center gap-2 text-left text-sm text-slate-600 ${
+                        isSettingsOpen ? 'rounded-t-xl' : 'rounded-xl'
+                    } ${ROW_BUTTON_CLASS}`}
+                    aria-expanded={isSettingsOpen}
+                    onClick={onToggleSettings}
+                >
+                    <Settings className="w-5 h-5 flex-shrink-0 group-hover:text-blue-600 transition-colors" />
+                    <span className="flex-1 group-hover:text-blue-600 transition-colors">Settings</span>
+                    <ChevronRight
+                        className={`w-4 h-4 flex-shrink-0 text-gray-400 transition-transform duration-200 ${
+                            isSettingsOpen ? 'rotate-90' : ''
+                        }`}
+                    />
+                </button>
+                {/* Height animation: grid row grows from 0fr to 1fr, hidden content is out of the tab order */}
+                <div
+                    className={`grid transition-[grid-template-rows,opacity,visibility] duration-200 ease-out ${
+                        isSettingsOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 invisible'
+                    }`}
+                >
+                    <div className="min-h-0 overflow-hidden">
+                        <div className="px-3 pt-1 pb-3">{settings}</div>
+                    </div>
+                </div>
             </section>
         </div>
     );
