@@ -36,6 +36,8 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 - `month`: Month to scroll to in format `YYMM`
     - Example: `?month=2506` (June 2025)
 - `vc`: Show vacation dates (`?vc=true`)
+- `city`: Default city, Open-Meteo geocoding (geonames) id (`?city=524901`)
+    - From the URL it is used without saving to localStorage (a shared link doesn't change own settings); without the param the stored default city is written to the URL; choosing or clearing the default city updates the param
 
 **Encoding/Decoding:**
 

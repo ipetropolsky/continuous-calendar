@@ -65,6 +65,28 @@ const rememberURL = () => {
     lastOverlay = getOverlay();
 };
 
+// Default city id from the `city` URL param
+const getURLCityId = (): number | null => {
+    const cityId = Number(new URLSearchParams(window.location.search).get('city'));
+    return Number.isInteger(cityId) && cityId > 0 ? cityId : null;
+};
+
+const setURLCityId = (cityId: number | null) => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (cityId) {
+        urlParams.set('city', String(cityId));
+    } else {
+        urlParams.delete('city');
+    }
+    const search = urlParams.toString();
+    window.history.replaceState(
+        window.history.state,
+        '',
+        `${window.location.pathname}${search ? '?' + search : ''}${window.location.hash}`
+    );
+    rememberURL();
+};
+
 // After history navigation between an overlay and the page under it, keep the latest search params
 const syncURLAfterPopState = () => {
     if (lastOverlay !== getOverlay() && window.location.search !== lastSearch) {
@@ -139,7 +161,15 @@ export function ContinuousCalendar() {
     const [weatherRefreshKey, setWeatherRefreshKey] = useState(0);
     const [shouldScrollToToday, setShouldScrollToToday] = useState(false);
     const [recentCities, setRecentCities] = useState<City[]>(loadRecentCities);
-    const [defaultCity, setDefaultCity] = useState<City | null>(loadDefaultCity);
+    // The city from the URL wins over the stored one, until it is loaded there is no default city
+    const [defaultCity, setDefaultCity] = useState<City | null>(() => {
+        const storedCity = loadDefaultCity();
+        const urlCityId = getURLCityId();
+        if (urlCityId === null || urlCityId === storedCity?.id) {
+            return storedCity;
+        }
+        return loadRecentCities().find((city) => city.id === urlCityId) ?? null;
+    });
     const [cities, setCities] = useState<Record<number, City>>(() =>
         Object.fromEntries(
             [...loadRecentCities(), loadDefaultCity()].filter((city) => !!city).map((city) => [city.id, city])
@@ -375,6 +405,24 @@ export function ContinuousCalendar() {
             if (!monthParam) {
                 setShouldScrollToFirst(true);
             }
+        }
+
+        // Default city: load the one from the URL (without saving it, a shared link doesn't change own settings)
+        // or put the stored one to the URL
+        const urlCityId = getURLCityId();
+        if (urlCityId === null) {
+            if (defaultCity) {
+                setURLCityId(defaultCity.id);
+            }
+        } else if (defaultCity?.id !== urlCityId) {
+            getCityById(urlCityId)
+                .then((city) => {
+                    if (city) {
+                        setCities((prev) => ({ ...prev, [city.id]: city }));
+                        setDefaultCity(city);
+                    }
+                })
+                .catch(() => {});
         }
 
         const vacationParam = urlParams.has('vc');
@@ -748,6 +796,7 @@ export function ContinuousCalendar() {
         }
         setDefaultCity(city);
         saveDefaultCity(city);
+        setURLCityId(city?.id ?? null);
         setCityPickerIntervalId(null);
     };
 
