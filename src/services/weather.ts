@@ -40,7 +40,7 @@ const WET_DAY_PRECIPITATION = 1; // mm
 const LEGACY_LAST_CITY_STORAGE_KEY = 'lastCity';
 const RECENT_CITIES_STORAGE_KEY = 'recentCities';
 const DEFAULT_CITY_STORAGE_KEY = 'defaultCity';
-const RECENT_CITIES_LIMIT = 3;
+const RECENT_CITIES_LIMIT = 5;
 
 const language = navigator.language.slice(0, 2);
 

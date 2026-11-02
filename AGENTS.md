@@ -79,7 +79,7 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 - Weather art is drawn inside the day circle under the number by `src/components/weather/WeatherLayer.tsx` (from weather-svg-kit v8): WMO code → `WeatherKind` in `weatherPresentation.ts`, trusted inline SVG geometry in `weatherScenes.ts`, opacity via CSS variables in `weather-opacity.css`
 - Day circle uses `.weather-day` sized by `--weather-day-size` (40/48/52/56/72px, xl cells are 80px), number size is `53cqi`; today is marked with a pink outline as in the kit preview; don't add width/height/text-size classes to it
 - `surface`: `selected-off` for selected weekends/holidays/vacations, `vacation` for unselected vacation weekdays; `contrast` is `on-dark` for selected days
-- localStorage: `defaultCity`, `recentCities` (last 3 chosen, the first one is the city of new intervals; legacy `lastCity` is migrated)
+- localStorage: `defaultCity`, `recentCities` (last 5 chosen, the first one is the city of new intervals; legacy `lastCity` is migrated)
 
 ### Intervals panel
 
