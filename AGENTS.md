@@ -48,7 +48,8 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 
 **URL Management:**
 
-- On mount: parse URL, set intervals/month/vacation flag
+- Before the first render (`useState` initializers): intervals, vacation flag and the visible range (`getInitialVisibleFrom`) are read from the URL, so selected days are drawn selected and the hidden weeks don't expand after loading
+- On mount: scroll target (month/first interval/today), cities of intervals, default city
 - On interval change: update URL via `history.replaceState()`
 - Month clicks update URL via `history.pushState()`
 
@@ -81,7 +82,7 @@ Single-page React calendar application for visualizing dates from 2025-2026 with
 - Weather art is drawn inside the day circle under the number by `src/components/weather/WeatherLayer.tsx` (from weather-svg-kit v8): WMO code → `WeatherKind` in `weatherPresentation.ts`, trusted inline SVG geometry in `weatherScenes.ts`, opacity via CSS variables in `weather-opacity.css`. Scenes are rendered once as `<symbol>` by `WeatherSymbols` (mounted in `ContinuousCalendar`), days reference them with `<use>`; opacity rules must stay plain class selectors, because the symbol content doesn't match selectors through the `<use>` host (CSS variables are inherited from it)
 - Day circle uses `.weather-day` sized by `--weather-day-size` (40/48/52/56/72px, xl cells are 80px), number size is `53cqi`; today is marked with a pink outline as in the kit preview; don't add width/height/text-size classes to it
 - `surface`: `selected-off` for selected weekends/holidays/vacations, `vacation` for unselected vacation weekdays; `contrast` is `on-dark` for selected days
-- localStorage: `defaultCity`, `recentCities` (last 5 chosen, the first one is the city of new intervals; legacy `lastCity` is migrated)
+- localStorage: `defaultCity`, `recentCities` (last 5 chosen, the first one is the city of new intervals; legacy `lastCity` is migrated), `knownCities` (last 500 cities looked up by id, so cities from the URL are known before the first render on the next visits). While a city from the URL is being looked up, the panel shows a placeholder instead of "Choose a city" (`loadingCityIds`)
 
 ### Intervals panel
 

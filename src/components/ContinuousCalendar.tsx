@@ -17,6 +17,7 @@ import {
     getCityById,
     loadDailyWeather,
     loadDefaultCity,
+    loadKnownCities,
     loadRecentCities,
     loadWeatherUntilHorizon,
     saveDefaultCity,
@@ -41,6 +42,82 @@ const getWeekStart = (date: Date): Date => {
 const getDefaultVisibleFrom = (): Date => {
     const today = new Date();
     return getWeekStart(new Date(today.getFullYear(), today.getMonth(), today.getDate() - PAST_WEEKS * 7));
+};
+
+const parseStringToDate = (dateStr: string): Date => {
+    if (dateStr.length !== 6) {
+        throw new Error('Invalid date format');
+    }
+
+    const year = parseInt(`20${dateStr.slice(0, 2)}`);
+    const month = parseInt(dateStr.slice(2, 4)) - 1; // Month is 0-indexed
+    const day = parseInt(dateStr.slice(4, 6));
+
+    return new Date(year, month, day);
+};
+
+const decodeIntervalFromURL = (urlParam: string): DateInterval | null => {
+    if (!urlParam) {
+        return null;
+    }
+
+    try {
+        const [datesStr, cityStr] = urlParam.split('_');
+        const [startStr, endStr] = datesStr.split('-');
+        const cityId = cityStr ? parseInt(cityStr) : NaN;
+        return {
+            id: `${Date.now()}-${Math.random()}`,
+            startDate: parseStringToDate(startStr),
+            endDate: parseStringToDate(endStr),
+            cityId: Number.isNaN(cityId) ? undefined : cityId,
+        };
+    } catch {
+        return null;
+    }
+};
+
+// Parse month from URL string (YYMM)
+const parseMonthFromString = (monthStr: string): { year: number; month: number } | null => {
+    if (monthStr.length !== 4) {
+        return null;
+    }
+
+    try {
+        const year = parseInt(`20${monthStr.slice(0, 2)}`);
+        const month = parseInt(monthStr.slice(2, 4)) - 1; // Month is 0-indexed
+        return { year, month };
+    } catch {
+        return null;
+    }
+};
+
+// Intervals from the URL, read before the first render, so the selected days are drawn selected right away
+const getURLIntervals = (): DateInterval[] =>
+    new URLSearchParams(window.location.search)
+        .getAll('dates')
+        .map(decodeIntervalFromURL)
+        .filter((interval) => !!interval);
+
+// The earliest visible week: earlier than the default one if intervals or the month from the URL start before it.
+// Computed before the first render, so the calendar doesn't show the default weeks first.
+const getInitialVisibleFrom = (): Date => {
+    const urlParams = new URLSearchParams(window.location.search);
+    let earliestDate = getDefaultVisibleFrom();
+    getURLIntervals().forEach((interval) => {
+        if (interval.startDate < earliestDate) {
+            earliestDate = interval.startDate;
+        }
+    });
+    const monthParam = urlParams.get('month');
+    const monthData = monthParam ? parseMonthFromString(monthParam) : null;
+    if (monthData) {
+        const firstDayOfMonth = new Date(monthData.year, monthData.month, 1);
+        if (firstDayOfMonth < earliestDate) {
+            earliestDate = firstDayOfMonth;
+        }
+    }
+    const earliestWeekStart = getWeekStart(earliestDate);
+    return earliestWeekStart < calendarConfig.startDate ? calendarConfig.startDate : earliestWeekStart;
 };
 
 // Weather is requested again this often while the page stays open, outdated forecast is refreshed
@@ -644,14 +721,14 @@ const CalendarGrid = memo(function CalendarGrid({
 });
 
 export function ContinuousCalendar() {
-    const [intervals, setIntervals] = useState<DateInterval[]>([]);
+    const [intervals, setIntervals] = useState<DateInterval[]>(getURLIntervals);
     const [selectedStart, setSelectedStart] = useState<Date | null>(null);
     const [shouldScrollToFirst, setShouldScrollToFirst] = useState(false);
     const [shouldScrollToMonth, setShouldScrollToMonth] = useState<string | null>(null);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [showVacations, setShowVacations] = useState(false);
+    const [showVacations, setShowVacations] = useState(() => new URLSearchParams(window.location.search).has('vc'));
     // Earlier weeks are hidden behind the "Past" button, their weather is not loaded
-    const [visibleFrom, setVisibleFrom] = useState(getDefaultVisibleFrom);
+    const [visibleFrom, setVisibleFrom] = useState(getInitialVisibleFrom);
     // Incremented when the tab becomes active, every hour and at midnight to refresh an outdated forecast
     const [weatherRefreshKey, setWeatherRefreshKey] = useState(0);
     // Today moves at midnight while the page stays open: today mark, forecast and typical weather ranges
@@ -674,13 +751,26 @@ export function ContinuousCalendar() {
         if (urlCityId === null || urlCityId === storedCity?.id) {
             return storedCity;
         }
-        return loadRecentCities().find((city) => city.id === urlCityId) ?? null;
+        return [...loadRecentCities(), ...loadKnownCities()].find((city) => city.id === urlCityId) ?? null;
     });
     const [cities, setCities] = useState<Record<number, City>>(() =>
         Object.fromEntries(
-            [...loadRecentCities(), loadDefaultCity()].filter((city) => !!city).map((city) => [city.id, city])
+            [...loadKnownCities(), ...loadRecentCities(), loadDefaultCity()]
+                .filter((city) => !!city)
+                .map((city) => [city.id, city])
         )
     );
+    // Cities from the URL being looked up, the panel shows a placeholder instead of "Choose a city" for them
+    const [loadingCityIds, setLoadingCityIds] = useState<ReadonlySet<number>>(
+        () =>
+            new Set(
+                [...getURLIntervals().map((interval) => interval.cityId), getURLCityId()].filter(
+                    (cityId): cityId is number => !!cityId && !cities[cityId]
+                )
+            )
+    );
+    const finishCityLoading = (cityId: number) =>
+        setLoadingCityIds((prev) => new Set([...prev].filter((id) => id !== cityId)));
     const [weather, setWeather] = useState<Record<number, WeatherByDate>>({});
     // Typical weather by past years statistics for dates beyond the forecast
     const [typicalWeather, setTypicalWeather] = useState<Record<number, TypicalWeather>>({});
@@ -699,7 +789,7 @@ export function ContinuousCalendar() {
     const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_PANEL_MEDIA).matches);
     const desktopPanelRef = useRef<HTMLDivElement>(null);
 
-    const { startDate, weekDayLabels } = calendarConfig;
+    const { weekDayLabels } = calendarConfig;
 
     const days = useMemo(() => generateCalendarData(showVacations), [showVacations]);
     const weeks = useMemo(() => organizeIntoWeeks(days), [days]);
@@ -722,43 +812,11 @@ export function ContinuousCalendar() {
         return `${startStr}-${endStr}${cityStr}`;
     };
 
-    const decodeIntervalFromURL = (urlParam: string): DateInterval | null => {
-        if (!urlParam) {
-            return null;
-        }
-
-        try {
-            const [datesStr, cityStr] = urlParam.split('_');
-            const [startStr, endStr] = datesStr.split('-');
-            const cityId = cityStr ? parseInt(cityStr) : NaN;
-            return {
-                id: `${Date.now()}-${Math.random()}`,
-                startDate: parseStringToDate(startStr),
-                endDate: parseStringToDate(endStr),
-                cityId: Number.isNaN(cityId) ? undefined : cityId,
-            };
-        } catch {
-            return null;
-        }
-    };
-
     const formatDateToString = (date: Date): string => {
         const year = date.getFullYear().toString().slice(-2); // Last 2 digits of year
         const month = (date.getMonth() + 1).toString().padStart(2, '0');
         const day = date.getDate().toString().padStart(2, '0');
         return `${year}${month}${day}`;
-    };
-
-    const parseStringToDate = (dateStr: string): Date => {
-        if (dateStr.length !== 6) {
-            throw new Error('Invalid date format');
-        }
-
-        const year = parseInt(`20${dateStr.slice(0, 2)}`);
-        const month = parseInt(dateStr.slice(2, 4)) - 1; // Month is 0-indexed
-        const day = parseInt(dateStr.slice(4, 6));
-
-        return new Date(year, month, day);
     };
 
     // Parse URL on component mount
@@ -772,10 +830,7 @@ export function ContinuousCalendar() {
         }
 
         const urlParams = new URLSearchParams(window.location.search);
-        const parsedIntervals = urlParams
-            .getAll('dates')
-            .map(decodeIntervalFromURL)
-            .filter((interval) => !!interval);
+        const parsedIntervals = intervals;
         const monthParam = urlParams.get('month');
 
         if (monthParam) {
@@ -783,7 +838,6 @@ export function ContinuousCalendar() {
         }
 
         if (parsedIntervals.length > 0) {
-            setIntervals(parsedIntervals);
             loadIntervalCities(parsedIntervals);
             // Scroll to first interval if month param is not set
             if (!monthParam) {
@@ -806,30 +860,9 @@ export function ContinuousCalendar() {
                         setDefaultCity(city);
                     }
                 })
-                .catch(() => {});
+                .catch(() => {})
+                .finally(() => finishCityLoading(urlCityId));
         }
-
-        const vacationParam = urlParams.has('vc');
-        if (vacationParam) {
-            setShowVacations(true);
-        }
-
-        // Show earlier weeks if intervals or the month from the URL start before them
-        let earliestDate = getDefaultVisibleFrom();
-        parsedIntervals.forEach((interval) => {
-            if (interval.startDate < earliestDate) {
-                earliestDate = interval.startDate;
-            }
-        });
-        const monthData = monthParam ? parseMonthFromString(monthParam) : null;
-        if (monthData) {
-            const firstDayOfMonth = new Date(monthData.year, monthData.month, 1);
-            if (firstDayOfMonth < earliestDate) {
-                earliestDate = firstDayOfMonth;
-            }
-        }
-        const earliestWeekStart = getWeekStart(earliestDate);
-        setVisibleFrom(earliestWeekStart < startDate ? startDate : earliestWeekStart);
 
         // Set scroll to today if no intervals or month param
         if (parsedIntervals.length === 0 && !monthParam) {
@@ -846,16 +879,19 @@ export function ContinuousCalendar() {
             if (cities[cityId!]) {
                 return;
             }
-            getCityById(cityId!).then((city) => {
-                if (!city) {
-                    return;
-                }
-                setCities((prev) => ({ ...prev, [city.id]: city }));
-                // Use city of the last interval as default if nothing was chosen before
-                if (city.id === lastIntervalCityId) {
-                    setRecentCities((prev) => (prev.length > 0 ? prev : [city]));
-                }
-            });
+            getCityById(cityId!)
+                .then((city) => {
+                    if (!city) {
+                        return;
+                    }
+                    setCities((prev) => ({ ...prev, [city.id]: city }));
+                    // Use city of the last interval as default if nothing was chosen before
+                    if (city.id === lastIntervalCityId) {
+                        setRecentCities((prev) => (prev.length > 0 ? prev : [city]));
+                    }
+                })
+                .catch(() => {})
+                .finally(() => finishCityLoading(cityId!));
         });
     };
 
@@ -1164,21 +1200,6 @@ export function ContinuousCalendar() {
         return `${yearStr}${monthStr}`;
     };
 
-    // Parse month from URL string (YYMM)
-    const parseMonthFromString = (monthStr: string): { year: number; month: number } | null => {
-        if (monthStr.length !== 4) {
-            return null;
-        }
-
-        try {
-            const year = parseInt(`20${monthStr.slice(0, 2)}`);
-            const month = parseInt(monthStr.slice(2, 4)) - 1; // Month is 0-indexed
-            return { year, month };
-        } catch {
-            return null;
-        }
-    };
-
     // Handle month click
     const handleMonthClick = (year: number, monthName: string) => {
         const monthIndex = [
@@ -1300,8 +1321,9 @@ export function ContinuousCalendar() {
                 .map((interval) => ({
                     ...interval,
                     city: interval.cityId ? (cities[interval.cityId] ?? null) : null,
+                    isCityLoading: !!interval.cityId && loadingCityIds.has(interval.cityId),
                 })),
-        [intervals, cities]
+        [intervals, cities, loadingCityIds]
     );
 
     const updateIntervals = (newIntervals: DateInterval[]) => {
@@ -1369,6 +1391,7 @@ export function ContinuousCalendar() {
             pendingStart={selectedStart}
             onCancelPending={() => setSelectedStart(null)}
             defaultCity={defaultCity}
+            isDefaultCityLoading={!defaultCity && loadingCityIds.has(getURLCityId() ?? 0)}
             recentCities={recentCities}
             cityPickerIntervalId={cityPickerIntervalId}
             onDefaultCitySelect={handleDefaultCitySelect}

@@ -12,6 +12,7 @@ export interface IntervalItem {
     startDate: Date;
     endDate: Date;
     city: City | null;
+    isCityLoading: boolean; // The city from the URL is being looked up
 }
 
 // City picker id for the default city, interval ids never match it
@@ -22,6 +23,7 @@ interface IntervalsPanelProps {
     pendingStart: Date | null; // Start of the interval being selected
     onCancelPending: () => void;
     defaultCity: City | null;
+    isDefaultCityLoading: boolean;
     recentCities: City[];
     cityPickerIntervalId: string | null;
     onDefaultCitySelect: (city: City | null) => void;
@@ -88,6 +90,21 @@ export function PendingIntervalCard({ start, onCancel, className = '', shouldRev
     );
 }
 
+// City name, or a placeholder while the city from the URL is being looked up
+const renderCityName = (city: City | null, isLoading: boolean) => {
+    if (city) {
+        return city.name;
+    }
+    return isLoading ? (
+        <span
+            className="inline-block w-20 h-3 align-middle rounded bg-zinc-200 animate-pulse"
+            aria-label="Loading city"
+        />
+    ) : (
+        'Choose a city'
+    );
+};
+
 const getDaysCount = (start: Date, end: Date): number => Math.round((end.getTime() - start.getTime()) / DAY_MS) + 1;
 
 // The pending interval is a list item too, so it appears and disappears like intervals
@@ -113,6 +130,7 @@ export function IntervalsPanel({
     pendingStart,
     onCancelPending,
     defaultCity,
+    isDefaultCityLoading,
     recentCities,
     cityPickerIntervalId,
     onDefaultCitySelect,
@@ -177,7 +195,7 @@ export function IntervalsPanel({
                 >
                     <MapPin className="w-4 h-4 flex-shrink-0 group-hover:text-blue-600 transition-colors" />
                     <span className="truncate group-hover:text-blue-600 transition-colors">
-                        {interval.city?.name ?? 'Choose a city'}
+                        {renderCityName(interval.city, interval.isCityLoading)}
                     </span>
                 </button>
 
@@ -208,7 +226,7 @@ export function IntervalsPanel({
                     >
                         <span className="flex items-center gap-1 text-sm text-slate-600 group-hover:text-blue-600 transition-colors">
                             <MapPin className="w-4 h-4 flex-shrink-0" />
-                            <span className="truncate">{defaultCity?.name ?? 'Choose a city'}</span>
+                            <span className="truncate">{renderCityName(defaultCity, isDefaultCityLoading)}</span>
                         </span>
                         <span className="block mt-1 text-xs text-gray-500">Weather for days outside of intervals</span>
                     </button>

@@ -40,6 +40,9 @@ const WET_DAY_PRECIPITATION = 1; // mm
 const LEGACY_LAST_CITY_STORAGE_KEY = 'lastCity';
 const RECENT_CITIES_STORAGE_KEY = 'recentCities';
 const DEFAULT_CITY_STORAGE_KEY = 'defaultCity';
+// Cities looked up by id, so cities from the URL are known before the first render on the next visits
+const KNOWN_CITIES_STORAGE_KEY = 'knownCities';
+const KNOWN_CITIES_LIMIT = 500; // ~150 bytes each
 const RECENT_CITIES_LIMIT = 5;
 
 const language = navigator.language.slice(0, 2);
@@ -86,7 +89,9 @@ export const getCityById = async (id: number): Promise<City | null> => {
     if (!response.ok) {
         return null;
     }
-    return toCity(await response.json());
+    const city = toCity(await response.json());
+    saveKnownCity(city);
+    return city;
 };
 
 const fetchDaily = async (url: string, city: City, start: string, end: string): Promise<WeatherByDate> => {
@@ -494,3 +499,12 @@ export const saveRecentCities = (recentCities: City[]) => {
 export const loadDefaultCity = (): City | null => loadJSON<City>(DEFAULT_CITY_STORAGE_KEY);
 
 export const saveDefaultCity = (city: City | null) => saveJSON(DEFAULT_CITY_STORAGE_KEY, city);
+
+// Cities looked up by id before, the most recent last
+export const loadKnownCities = (): City[] => loadJSON<City[]>(KNOWN_CITIES_STORAGE_KEY) ?? [];
+
+const saveKnownCity = (city: City) =>
+    saveJSON(
+        KNOWN_CITIES_STORAGE_KEY,
+        [...loadKnownCities().filter(({ id }) => id !== city.id), city].slice(-KNOWN_CITIES_LIMIT)
+    );
