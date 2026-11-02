@@ -19,3 +19,11 @@ export const writeWeatherCache = async (key: string, value: unknown): Promise<vo
         // Ignore storage errors (private mode, quota), the data will be requested again
     }
 };
+
+export const removeWeatherCache = async (key: string): Promise<void> => {
+    try {
+        localStorage.removeItem(`${KEY_PREFIX}${key}`);
+    } catch {
+        // Ignore storage errors
+    }
+};

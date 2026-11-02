@@ -15,6 +15,7 @@ import {
     fetchTypicalWeather,
     formatCityLabel,
     getCityById,
+    isBeyondForecast,
     loadDailyWeather,
     loadDefaultCity,
     loadKnownCities,
@@ -979,9 +980,12 @@ export function ContinuousCalendar() {
         });
     }, [intervals, cities, visibleFrom, weatherRefreshKey, addCityWeather]);
 
-    // Load typical weather for interval cities and the default city
+    // Load typical weather for the default city and cities of intervals that end beyond the forecast horizon
+    // (within the horizon the default city weather is shown until the forecast is loaded)
     useEffect(() => {
-        const cityIds = new Set(intervals.map(({ cityId }) => cityId));
+        const cityIds = new Set(
+            intervals.filter(({ endDate }) => isBeyondForecast(endDate)).map(({ cityId }) => cityId)
+        );
         const typicalCities = Object.values(cities).filter(({ id }) => cityIds.has(id) || id === defaultCity?.id);
         typicalCities.forEach((city) => {
             fetchTypicalWeather(city)
