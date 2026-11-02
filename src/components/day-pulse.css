@@ -1,0 +1,48 @@
+/* Translucent circle spreading once from the day circle and fading, like the sun halo in the weather art.
+   Same size and position as `.weather-day`, color is currentColor. */
+.day-pulse {
+    position: absolute;
+    z-index: -1;
+    top: 50%;
+    left: 50%;
+    inline-size: min(100%, var(--weather-day-size, 56px));
+    aspect-ratio: 1;
+    translate: -50% -50%;
+    pointer-events: none;
+}
+
+.day-pulse__wave {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, currentColor 97%, transparent);
+    opacity: 0;
+    /* Springy spreading, even fading through the whole second */
+    animation:
+        day-pulse-spread 1s cubic-bezier(0.25, 0.8, 0.35, 1.05) both,
+        day-pulse-fade 1s cubic-bezier(0.4, 0, 0.6, 1) both;
+}
+
+@keyframes day-pulse-spread {
+    from {
+        scale: 1;
+    }
+    to {
+        scale: 1.375;
+    }
+}
+
+@keyframes day-pulse-fade {
+    from {
+        opacity: 0.25;
+    }
+    to {
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .day-pulse {
+        display: none;
+    }
+}

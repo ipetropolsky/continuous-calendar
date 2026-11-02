@@ -25,6 +25,8 @@ import {
     type WeatherByDate,
 } from '@/services/weather';
 
+import './day-pulse.css';
+
 // By default the calendar starts this many weeks before today, each "Past" click shows more months
 const PAST_WEEKS = 2;
 const PAST_STEP_MONTHS = 3;
@@ -405,6 +407,19 @@ const isDaySelected = (date: Date, selectedStart: Date | null, intervals: DateIn
     selectedStart?.getTime() === date.getTime() ||
     intervals.some((interval) => date >= interval.startDate && date <= interval.endDate);
 
+// Days of an interval shown from the panel, waves spread from them
+interface DayPulse {
+    startDate: Date;
+    endDate: Date;
+    key: number;
+}
+
+// Height of the sticky week day headers with their bottom margin, px
+const WEEK_DAY_HEADERS_HEIGHT = 56;
+
+// Waves play once, then the days are re-rendered without them
+const DAY_PULSE_MS = 1200;
+
 interface DayCellProps {
     day: CalendarDay;
     isSelectedDay: boolean;
@@ -415,6 +430,7 @@ interface DayCellProps {
     startingIntervalId: string | null; // Interval with a city starting on this day
     startingCity: City | null;
     isCityPickerOpen: boolean;
+    pulseKey: number; // Waves are shown while non-zero, a new key plays them again
     onDateClick: (date: Date) => void;
     onCityLabelClick: (intervalId: string) => void;
 }
@@ -430,6 +446,7 @@ const DayCell = memo(function DayCell({
     startingIntervalId,
     startingCity,
     isCityPickerOpen,
+    pulseKey,
     onDateClick,
     onCityLabelClick,
 }: DayCellProps) {
@@ -448,11 +465,15 @@ const DayCell = memo(function DayCell({
 
     // Determine background colors based on selection status
     let bgClass = 'bg-zinc-50 hover:bg-zinc-100';
+    // Waves have the color of the circle
+    let pulseClass = 'text-zinc-300';
     if (isSelectedDay) {
         if (isOffDay || day.isVacation) {
             bgClass = 'bg-red-600 hover:bg-red-700';
+            pulseClass = 'text-red-600';
         } else {
             bgClass = 'bg-slate-600 hover:bg-slate-700';
+            pulseClass = 'text-slate-600';
         }
     } else if (day.isVacation) {
         bgClass = 'bg-orange-50 hover:bg-orange-100';
@@ -477,6 +498,11 @@ const DayCell = memo(function DayCell({
             className="relative h-12 xs:h-13 sm:h-15 md:h-16 md:w-16 xl:h-20 xl:w-20 flex justify-center align-center items-center [--weather-day-size:40px] xs:[--weather-day-size:48px] sm:[--weather-day-size:52px] md:[--weather-day-size:56px] xl:[--weather-day-size:72px]"
             data-date={`${day.year}-${day.month}-${day.day}`}
         >
+            {pulseKey > 0 && (
+                <div key={pulseKey} className={`day-pulse ${pulseClass}`} aria-hidden="true">
+                    <span className="day-pulse__wave" />
+                </div>
+            )}
             {/* Day cell: weather art under the number */}
             <div
                 className={`weather-day font-serif ${bgClass} ${dayClass} ${todayClass} ${isTypicalWeather ? '[--weather-opacity:0.6]' : ''} transition-colors cursor-pointer`}
@@ -511,6 +537,7 @@ interface CalendarGridProps {
     cityPickerIntervalId: string | null;
     weatherByDay: Map<number, DayWeatherView>; // Keyed by date time
     todayTime: number;
+    pulse: DayPulse | null;
     onDateClick: (date: Date) => void;
     onCityLabelClick: (intervalId: string) => void;
     onMonthClick: (year: number, monthName: string) => void;
@@ -527,6 +554,7 @@ const CalendarGrid = memo(function CalendarGrid({
     cityPickerIntervalId,
     weatherByDay,
     todayTime,
+    pulse,
     onDateClick,
     onCityLabelClick,
     onMonthClick,
@@ -596,6 +624,11 @@ const CalendarGrid = memo(function CalendarGrid({
                                             isCityPickerOpen={
                                                 !!startingInterval && startingInterval.id === cityPickerIntervalId
                                             }
+                                            pulseKey={
+                                                pulse && day.date >= pulse.startDate && day.date <= pulse.endDate
+                                                    ? pulse.key
+                                                    : 0
+                                            }
                                             onDateClick={onDateClick}
                                             onCityLabelClick={onCityLabelClick}
                                         />
@@ -623,6 +656,15 @@ export function ContinuousCalendar() {
     const [weatherRefreshKey, setWeatherRefreshKey] = useState(0);
     // Today moves at midnight while the page stays open: today mark, forecast and typical weather ranges
     const [todayTime, setTodayTime] = useState(() => getToday().getTime());
+    const [pulse, setPulse] = useState<DayPulse | null>(null);
+
+    useEffect(() => {
+        if (!pulse) {
+            return;
+        }
+        const timeoutId = setTimeout(() => setPulse(null), DAY_PULSE_MS);
+        return () => clearTimeout(timeoutId);
+    }, [pulse]);
     const [shouldScrollToToday, setShouldScrollToToday] = useState(false);
     const [recentCities, setRecentCities] = useState<City[]>(loadRecentCities);
     // The city from the URL wins over the stored one, until it is loaded there is no default city
@@ -1051,22 +1093,61 @@ export function ContinuousCalendar() {
         }
     }, [shouldScrollToFirst, shouldScrollToMonth, shouldScrollToToday, intervals]);
 
-    // Helper function to scroll to a specific date
-    const scrollToDate = (date: Date) => {
+    // Helper function to scroll to a specific date, resolves when the day is fully visible (below the sticky week day
+    // headers) or the scrolling ends
+    const scrollToDate = (date: Date): Promise<void> => {
         const dateString = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
         const element = document.querySelector(`[data-date="${dateString}"]`);
 
-        if (element) {
-            const rect = element.getBoundingClientRect();
-            const elementTop = rect.top + window.pageYOffset;
-            const viewportHeight = window.innerHeight;
-            const targetPosition = elementTop - viewportHeight / 2 + rect.height / 2;
-
-            window.scrollTo({
-                top: Math.max(0, targetPosition),
-                behavior: 'smooth',
-            });
+        if (!element) {
+            return Promise.resolve();
         }
+        const rect = element.getBoundingClientRect();
+        const elementTop = rect.top + window.pageYOffset;
+        const viewportHeight = window.innerHeight;
+        const targetPosition = Math.min(
+            Math.max(0, elementTop - viewportHeight / 2 + rect.height / 2),
+            document.documentElement.scrollHeight - viewportHeight
+        );
+        if (Math.abs(targetPosition - window.scrollY) < 1) {
+            return Promise.resolve();
+        }
+
+        window.scrollTo({
+            top: targetPosition,
+            behavior: 'smooth',
+        });
+        // `scrollend` isn't supported everywhere, the timeout is a fallback
+        return new Promise((resolve) => {
+            const observer = new IntersectionObserver(
+                ([entry]) => {
+                    if (entry.isIntersecting) {
+                        done();
+                    }
+                },
+                { rootMargin: `-${WEEK_DAY_HEADERS_HEIGHT}px 0px 0px 0px`, threshold: 1 }
+            );
+            const done = () => {
+                observer.disconnect();
+                window.removeEventListener('scrollend', done);
+                clearTimeout(timeoutId);
+                resolve();
+            };
+            const timeoutId = setTimeout(done, 1000);
+            window.addEventListener('scrollend', done);
+            observer.observe(element);
+        });
+    };
+
+    // Scroll to the interval and play waves from its days
+    const showInterval = (interval: Pick<DateInterval, 'startDate' | 'endDate'>) => {
+        void scrollToDate(interval.startDate).then(() =>
+            setPulse((prev) => ({
+                startDate: interval.startDate,
+                endDate: interval.endDate,
+                key: (prev?.key ?? 0) + 1,
+            }))
+        );
     };
 
     // Helper function to scroll to a month
@@ -1326,7 +1407,7 @@ export function ContinuousCalendar() {
                 if (showIntervalsSheet) {
                     closeIntervalsSheet();
                 }
-                scrollToDate(interval.startDate);
+                showInterval(interval);
             }}
         />
     );
@@ -1374,6 +1455,7 @@ export function ContinuousCalendar() {
                         cityPickerIntervalId={cityPickerIntervalId}
                         weatherByDay={weatherByDay}
                         todayTime={todayTime}
+                        pulse={pulse}
                         onDateClick={onDateClick}
                         onCityLabelClick={onCityLabelClick}
                         onMonthClick={onMonthClick}
