@@ -422,18 +422,20 @@ const requestTypicalWeather = (city: City, firstYear: number, lastYear: number):
         );
 };
 
-const typicalWeatherRequests = new Map<number, Promise<TypicalWeather>>();
+const typicalWeatherRequests = new Map<string, Promise<TypicalWeather>>(); // Keyed by city id and years
 
 // Typical weather based on the last full years of the archive, stored until a new year adds data
+// (also in memory, so a page left open over the New Year gets the new years)
 export const fetchTypicalWeather = (city: City): Promise<TypicalWeather> => {
-    const current = typicalWeatherRequests.get(city.id);
+    const lastYear = new Date().getFullYear() - 1;
+    const firstYear = lastYear - CLIMATE_YEARS + 1;
+    const years = `${firstYear}-${lastYear}`;
+    const requestKey = `${city.id}:${years}`;
+    const current = typicalWeatherRequests.get(requestKey);
     if (current) {
         return current;
     }
 
-    const lastYear = new Date().getFullYear() - 1;
-    const firstYear = lastYear - CLIMATE_YEARS + 1;
-    const years = `${firstYear}-${lastYear}`;
     const promise = (async () => {
         const stored = await readWeatherCache<{ years: string; days: TypicalWeather }>(`typical:${city.id}`);
         if (stored?.years === years) {
@@ -444,8 +446,8 @@ export const fetchTypicalWeather = (city: City): Promise<TypicalWeather> => {
         return days;
     })();
     // Allow retry on failure
-    promise.catch(() => typicalWeatherRequests.delete(city.id));
-    typicalWeatherRequests.set(city.id, promise);
+    promise.catch(() => typicalWeatherRequests.delete(requestKey));
+    typicalWeatherRequests.set(requestKey, promise);
     return promise;
 };
 

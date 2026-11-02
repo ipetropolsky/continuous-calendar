@@ -41,6 +41,9 @@ const getDefaultVisibleFrom = (): Date => {
     return getWeekStart(new Date(today.getFullYear(), today.getMonth(), today.getDate() - PAST_WEEKS * 7));
 };
 
+// Weather is requested again this often while the page stays open, outdated forecast is refreshed
+const WEATHER_REFRESH_MS = 60 * 60 * 1000;
+
 // Intervals panel is shown on the right on wide screens, a floating button opens it as a sheet otherwise
 const DESKTOP_PANEL_MEDIA = '(min-width: 64rem)';
 
@@ -222,12 +225,6 @@ interface DateInterval {
     cityId?: number;
 }
 
-interface DateStatus {
-    isSelected: boolean;
-    isInInterval: boolean;
-    intervalId: string | null;
-}
-
 const getToday = (): Date => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -336,6 +333,75 @@ function CityLabel({ intervalId, city, isPickerOpen, onClick }: CityLabelProps) 
     );
 }
 
+interface DayWeatherView {
+    kind: WeatherKind;
+    isTypical: boolean;
+    title: string;
+}
+
+interface WeatherSources {
+    intervals: DateInterval[];
+    cities: Record<number, City>;
+    weather: Record<number, WeatherByDate>;
+    typicalWeather: Record<number, TypicalWeather>;
+    defaultCity: City | null;
+}
+
+// Weather of the day is taken from the interval that starts later (or ends later if both start on the same day),
+// days without interval weather show the default city weather.
+// Beyond the forecast horizon and until the forecast is loaded typical weather by past years statistics is used.
+const getDayWeather = (
+    date: Date,
+    { intervals, cities, weather, typicalWeather, defaultCity }: WeatherSources
+): DayWeatherView | null => {
+    let displayInterval: DateInterval | undefined;
+    for (const interval of intervals) {
+        if (date < interval.startDate || date > interval.endDate || !interval.cityId) {
+            continue;
+        }
+        if (
+            !displayInterval ||
+            interval.startDate > displayInterval.startDate ||
+            (interval.startDate.getTime() === displayInterval.startDate.getTime() &&
+                interval.endDate > displayInterval.endDate)
+        ) {
+            displayInterval = interval;
+        }
+    }
+
+    const dateString = formatDateString(date);
+    const canBeTypical = canShowTypicalWeather(date);
+    const getCityWeather = (city: City | null) =>
+        city
+            ? (weather[city.id]?.[dateString] ??
+              (canBeTypical ? typicalWeather[city.id]?.[dateString.slice(5)] : undefined))
+            : undefined;
+
+    let city = displayInterval?.cityId ? (cities[displayInterval.cityId] ?? null) : null;
+    let dayWeather = getCityWeather(city);
+    if (!dayWeather && defaultCity) {
+        city = defaultCity;
+        dayWeather = getCityWeather(defaultCity);
+    }
+    if (!city || !dayWeather) {
+        return null;
+    }
+    const kind = getWeatherKind(dayWeather.code);
+    const temperature = `${Math.round(dayWeather.tMax)}° / ${Math.round(dayWeather.tMin)}°`;
+    return {
+        kind,
+        isTypical: !!dayWeather.isTypical,
+        title: dayWeather.isTypical
+            ? `${city.name}, typical weather: ${WEATHER_LABELS[kind]}, ${temperature}`
+            : `${city.name}: ${WEATHER_LABELS[kind]}, ${temperature}`,
+    };
+};
+
+// Day is the chosen start of a new interval or lies in an interval
+const isDaySelected = (date: Date, selectedStart: Date | null, intervals: DateInterval[]): boolean =>
+    selectedStart?.getTime() === date.getTime() ||
+    intervals.some((interval) => date >= interval.startDate && date <= interval.endDate);
+
 interface DayCellProps {
     day: CalendarDay;
     isSelectedDay: boolean;
@@ -433,6 +499,114 @@ const DayCell = memo(function DayCell({
     );
 });
 
+interface CalendarGridProps {
+    weeks: (CalendarDay | null)[][];
+    visibleFrom: Date;
+    selectedStart: Date | null;
+    intervals: DateInterval[];
+    cities: Record<number, City>;
+    cityPickerIntervalId: string | null;
+    weatherByDay: Map<number, DayWeatherView>; // Keyed by date time
+    todayTime: number;
+    onDateClick: (date: Date) => void;
+    onCityLabelClick: (intervalId: string) => void;
+    onMonthClick: (year: number, monthName: string) => void;
+    onShowMorePast: () => void;
+}
+
+// Memoized with stable handlers, so state changes outside the calendar (panel, sheet, settings) don't touch it
+const CalendarGrid = memo(function CalendarGrid({
+    weeks,
+    visibleFrom,
+    selectedStart,
+    intervals,
+    cities,
+    cityPickerIntervalId,
+    weatherByDay,
+    todayTime,
+    onDateClick,
+    onCityLabelClick,
+    onMonthClick,
+    onShowMorePast,
+}: CalendarGridProps) {
+    // Week is hidden if all its days are before visibleFrom (week may contain null slots for empty days)
+    const isWeekHidden = (week: (CalendarDay | null)[]): boolean => week.every((day) => !day || day.date < visibleFrom);
+    const hasHiddenWeeks = weeks.some(isWeekHidden);
+
+    return (
+        <div>
+            <PastButton show={hasHiddenWeeks} onClick={onShowMorePast} />
+
+            {weeks.map((week, weekIndex) => {
+                const isHidden = isWeekHidden(week);
+                // Check if this week has the first day of a new month
+                const firstDayOfMonth = week.find((day) => day && day.isNewMonth);
+
+                // Days of hidden weeks are not rendered, they appear with the week
+                return (
+                    <div
+                        key={weekIndex}
+                        className={`relative z-10 transition-[max-height,opacity] duration-500 ease-in-out ${
+                            isHidden
+                                ? 'max-h-0 overflow-hidden mb-0 opacity-0'
+                                : 'max-h-[10000px] opacity-100 mb-2 md:mb-0'
+                        }`}
+                    >
+                        {/* Month label for mobile - above first day of month */}
+                        {firstDayOfMonth && !isHidden && (
+                            <div onClick={() => onMonthClick(firstDayOfMonth.year, firstDayOfMonth.monthName)}>
+                                <div className="absolute p-1 z-20 right-full -translate-x-1 translate-y-1 bottom-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-700 hover:text-blue-500 transition-colors inline-block cursor-pointer">
+                                    {firstDayOfMonth.monthName}
+                                    {'\u00a0'}
+                                    <span className="text-gray-500">{firstDayOfMonth.year}</span>
+                                </div>
+                            </div>
+                        )}
+
+                        {!isHidden && (
+                            <div className="grid grid-cols-7 gap-1 mb-2 md:mb-0">
+                                {week.map((day, dayIndex) => {
+                                    if (!day) {
+                                        return <div key={dayIndex} className="h-12 md:h-16 xl:h-20" />;
+                                    }
+
+                                    const dayWeather = weatherByDay.get(day.date.getTime());
+                                    // City label on the first day of an interval
+                                    const startingInterval = intervals.find(
+                                        (interval) => interval.startDate.getTime() === day.date.getTime()
+                                    );
+                                    const startingCity = startingInterval?.cityId
+                                        ? (cities[startingInterval.cityId] ?? null)
+                                        : null;
+
+                                    return (
+                                        <DayCell
+                                            key={`${day.year}-${day.month}-${day.day}`}
+                                            day={day}
+                                            isSelectedDay={isDaySelected(day.date, selectedStart, intervals)}
+                                            isToday={day.date.getTime() === todayTime}
+                                            weatherKind={dayWeather?.kind ?? null}
+                                            isTypicalWeather={!!dayWeather?.isTypical}
+                                            weatherTitle={dayWeather?.title}
+                                            startingIntervalId={startingCity ? startingInterval!.id : null}
+                                            startingCity={startingCity}
+                                            isCityPickerOpen={
+                                                !!startingInterval && startingInterval.id === cityPickerIntervalId
+                                            }
+                                            onDateClick={onDateClick}
+                                            onCityLabelClick={onCityLabelClick}
+                                        />
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
+});
+
 export function ContinuousCalendar() {
     const [intervals, setIntervals] = useState<DateInterval[]>([]);
     const [selectedStart, setSelectedStart] = useState<Date | null>(null);
@@ -442,8 +616,10 @@ export function ContinuousCalendar() {
     const [showVacations, setShowVacations] = useState(false);
     // Earlier weeks are hidden behind the "Past" button, their weather is not loaded
     const [visibleFrom, setVisibleFrom] = useState(getDefaultVisibleFrom);
-    // Incremented when the tab becomes active to refresh an outdated forecast
+    // Incremented when the tab becomes active, every hour and at midnight to refresh an outdated forecast
     const [weatherRefreshKey, setWeatherRefreshKey] = useState(0);
+    // Today moves at midnight while the page stays open: today mark, forecast and typical weather ranges
+    const [todayTime, setTodayTime] = useState(() => getToday().getTime());
     const [shouldScrollToToday, setShouldScrollToToday] = useState(false);
     const [recentCities, setRecentCities] = useState<City[]>(loadRecentCities);
     // The city from the URL wins over the stored one, until it is loaded there is no default city
@@ -483,19 +659,15 @@ export function ContinuousCalendar() {
     const days = useMemo(() => generateCalendarData(showVacations), [showVacations]);
     const weeks = useMemo(() => organizeIntoWeeks(days), [days]);
 
-    // Week is hidden if all its days are before visibleFrom (week may contain null slots for empty days)
-    const shouldHideWeek = (week: (CalendarDay | null)[]): boolean =>
-        week.every((day) => !day || day.date < visibleFrom);
-
     // Show PAST_STEP_MONTHS more months before the visible ones
-    const showMorePast = () => {
+    const showMorePast = useCallback(() => {
         setVisibleFrom((prev) => {
             const earlier = getWeekStart(
                 new Date(prev.getFullYear(), prev.getMonth() - PAST_STEP_MONTHS, prev.getDate())
             );
-            return earlier < startDate ? startDate : earlier;
+            return earlier < calendarConfig.startDate ? calendarConfig.startDate : earlier;
         });
-    };
+    }, []);
 
     // URL encoding/decoding functions
     const encodeIntervalToURL = (interval: DateInterval): string => {
@@ -646,16 +818,39 @@ export function ContinuousCalendar() {
         setWeather((prev) => ({ ...prev, [cityId]: { ...prev[cityId], ...weatherByDate } }));
     }, []);
 
-    // Refresh weather when the tab becomes active, outdated forecast is requested again
+    // Refresh today and weather when the tab becomes active and every hour while the page stays open,
+    // forecast older than 12 hours is requested again
     useEffect(() => {
+        const refresh = () => {
+            setTodayTime(getToday().getTime());
+            setWeatherRefreshKey((prev) => prev + 1);
+        };
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
-                setWeatherRefreshKey((prev) => prev + 1);
+                refresh();
             }
         };
+        const intervalId = setInterval(refresh, WEATHER_REFRESH_MS);
         document.addEventListener('visibilitychange', handleVisibilityChange);
-        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
     }, []);
+
+    // Move to the next day right after midnight
+    useEffect(() => {
+        const nextDay = new Date(todayTime);
+        nextDay.setDate(nextDay.getDate() + 1);
+        const timeoutId = setTimeout(
+            () => {
+                setTodayTime(getToday().getTime());
+                setWeatherRefreshKey((prev) => prev + 1);
+            },
+            nextDay.getTime() - Date.now() + 1000
+        );
+        return () => clearTimeout(timeoutId);
+    }, [todayTime]);
 
     // Load weather for visible days of intervals with known cities
     useEffect(() => {
@@ -680,7 +875,7 @@ export function ContinuousCalendar() {
                 .then((weatherByDay) => setTypicalWeather((prev) => ({ ...prev, [city.id]: weatherByDay })))
                 .catch((error) => console.error('Failed to load typical weather:', error));
         });
-    }, [intervals, cities, defaultCity]);
+    }, [intervals, cities, defaultCity, weatherRefreshKey]);
 
     // Desktop panel fits the viewport from its current top, also before it sticks, so its own scroll reaches the end
     useEffect(() => {
@@ -953,56 +1148,6 @@ export function ContinuousCalendar() {
         setCityPickerIntervalId(null);
     };
 
-    const getIntervalCity = (interval: DateInterval | undefined): City | null =>
-        interval?.cityId ? (cities[interval.cityId] ?? null) : null;
-
-    // Weather of the day is taken from the interval that starts later (or ends later if both start on the same day),
-    // days without interval weather show the default city weather.
-    // Beyond the forecast horizon and until the forecast is loaded typical weather by past years statistics is used.
-    const getDayWeather = (date: Date): { kind: WeatherKind; isTypical: boolean; title: string } | null => {
-        let displayInterval: DateInterval | undefined;
-        for (const interval of intervals) {
-            if (date < interval.startDate || date > interval.endDate || !interval.cityId) {
-                continue;
-            }
-            if (
-                !displayInterval ||
-                interval.startDate > displayInterval.startDate ||
-                (interval.startDate.getTime() === displayInterval.startDate.getTime() &&
-                    interval.endDate > displayInterval.endDate)
-            ) {
-                displayInterval = interval;
-            }
-        }
-
-        const dateString = formatDateString(date);
-        const canBeTypical = canShowTypicalWeather(date);
-        const getCityWeather = (city: City | null) =>
-            city
-                ? (weather[city.id]?.[dateString] ??
-                  (canBeTypical ? typicalWeather[city.id]?.[dateString.slice(5)] : undefined))
-                : undefined;
-
-        let city = getIntervalCity(displayInterval);
-        let dayWeather = getCityWeather(city);
-        if (!dayWeather && defaultCity) {
-            city = defaultCity;
-            dayWeather = getCityWeather(defaultCity);
-        }
-        if (!city || !dayWeather) {
-            return null;
-        }
-        const kind = getWeatherKind(dayWeather.code);
-        const temperature = `${Math.round(dayWeather.tMax)}° / ${Math.round(dayWeather.tMin)}°`;
-        return {
-            kind,
-            isTypical: !!dayWeather.isTypical,
-            title: dayWeather.isTypical
-                ? `${city.name}, typical weather: ${WEATHER_LABELS[kind]}, ${temperature}`
-                : `${city.name}: ${WEATHER_LABELS[kind]}, ${temperature}`,
-        };
-    };
-
     // Intervals for the panel, in calendar order
     const intervalItems: IntervalItem[] = useMemo(
         () =>
@@ -1040,39 +1185,6 @@ export function ContinuousCalendar() {
         }
     };
 
-    // Check if a date is in any interval
-    const getDateStatus = (date: Date) => {
-        const dateTime = date.getTime();
-
-        // Check if date is selected as start
-        if (selectedStart && selectedStart.getTime() === dateTime) {
-            return {
-                isSelected: true,
-                isInInterval: false,
-                intervalId: null,
-            };
-        }
-
-        const dateStatus: DateStatus = {
-            isSelected: false,
-            isInInterval: false,
-            intervalId: null,
-        };
-
-        // Check if date is in any interval
-        for (const interval of intervals) {
-            const startTime = interval.startDate.getTime();
-            const endTime = interval.endDate.getTime();
-
-            if (dateTime >= startTime && dateTime <= endTime) {
-                dateStatus.isInInterval = true;
-                dateStatus.intervalId = interval.id;
-            }
-        }
-
-        return dateStatus;
-    };
-
     const handleCityLabelClick = (intervalId: string) => {
         setCityPickerIntervalId(intervalId);
         if (!isDesktop) {
@@ -1081,16 +1193,33 @@ export function ContinuousCalendar() {
     };
 
     // Day cells are memoized, they get stable handlers calling the latest ones
-    const dayHandlersRef = useRef({ handleDateClick, handleCityLabelClick });
+    const dayHandlersRef = useRef({ handleDateClick, handleCityLabelClick, handleMonthClick });
     useLayoutEffect(() => {
-        dayHandlersRef.current = { handleDateClick, handleCityLabelClick };
+        dayHandlersRef.current = { handleDateClick, handleCityLabelClick, handleMonthClick };
     });
     const onDateClick = useCallback((date: Date) => dayHandlersRef.current.handleDateClick(date), []);
     const onCityLabelClick = useCallback(
         (intervalId: string) => dayHandlersRef.current.handleCityLabelClick(intervalId),
         []
     );
-    const todayTime = getToday().getTime();
+    const onMonthClick = useCallback(
+        (year: number, monthName: string) => dayHandlersRef.current.handleMonthClick(year, monthName),
+        []
+    );
+
+    // Weather of visible days doesn't depend on the selection, so clicks don't recalculate it.
+    // Today is a dependency, because typical weather is shown from the last week on.
+    const weatherByDay = useMemo(() => {
+        const sources = { intervals, cities, weather, typicalWeather, defaultCity };
+        const result = new Map<number, DayWeatherView>();
+        days.forEach((day) => {
+            const dayWeather = day.date < visibleFrom ? null : getDayWeather(day.date, sources);
+            if (dayWeather) {
+                result.set(day.date.getTime(), dayWeather);
+            }
+        });
+        return result;
+    }, [days, visibleFrom, intervals, cities, weather, typicalWeather, defaultCity, todayTime]);
 
     const intervalsPanel = (
         <IntervalsPanel
@@ -1141,8 +1270,6 @@ export function ContinuousCalendar() {
         />
     );
 
-    const hiddenWeeksCount = weeks.reduce((result, week) => result + (shouldHideWeek(week) ? 1 : 0), 0);
-
     return (
         <div className="w-full max-w-7xl mx-auto pt-4 pb-8 md:px-8 md:pt-6 overflow-x-clip">
             <WeatherSymbols />
@@ -1177,83 +1304,20 @@ export function ContinuousCalendar() {
             <div className="flex gap-8 px-8 justify-center">
                 {/* Calendar section */}
                 <div className="w-full max-w-[364px] xs:max-w-full xs:w-[392px] sm:w-[420px] md:w-[448px] xl:w-[560px] flex-col relative">
-                    {/* Calendar grid */}
-                    <div>
-                        <PastButton show={hiddenWeeksCount > 0} onClick={showMorePast} />
-
-                        {weeks.map((week, weekIndex) => {
-                            const isHidden = shouldHideWeek(week);
-                            // Check if this week has the first day of a new month
-                            const firstDayOfMonth = week.find((day) => day && day.isNewMonth);
-
-                            // Days of hidden weeks are not rendered, they appear with the week
-                            return (
-                                <div
-                                    key={weekIndex}
-                                    className={`relative z-10 transition-[max-height,opacity] duration-500 ease-in-out ${
-                                        isHidden
-                                            ? 'max-h-0 overflow-hidden mb-0 opacity-0'
-                                            : 'max-h-[10000px] opacity-100 mb-2 md:mb-0'
-                                    }`}
-                                >
-                                    {/* Month label for mobile - above first day of month */}
-                                    {firstDayOfMonth && !isHidden && (
-                                        <div
-                                            onClick={() =>
-                                                handleMonthClick(firstDayOfMonth.year, firstDayOfMonth.monthName)
-                                            }
-                                        >
-                                            <div className="absolute p-1 z-20 right-full -translate-x-1 translate-y-1 bottom-full origin-bottom-right -rotate-90 text-nowrap text-right text-xs font-serif font-medium text-gray-700 hover:text-blue-500 transition-colors inline-block cursor-pointer">
-                                                {firstDayOfMonth.monthName}
-                                                {'\u00a0'}
-                                                <span className="text-gray-500">{firstDayOfMonth.year}</span>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {!isHidden && (
-                                        <div className="grid grid-cols-7 gap-1 mb-2 md:mb-0">
-                                            {week.map((day, dayIndex) => {
-                                                if (!day) {
-                                                    return <div key={dayIndex} className="h-12 md:h-16 xl:h-20" />;
-                                                }
-
-                                                const dateStatus = getDateStatus(day.date);
-                                                const dayWeather = getDayWeather(day.date);
-                                                // City label on the first day of an interval
-                                                const startingInterval = intervals.find(
-                                                    (interval) => interval.startDate.getTime() === day.date.getTime()
-                                                );
-                                                const startingCity = startingInterval?.cityId
-                                                    ? (cities[startingInterval.cityId] ?? null)
-                                                    : null;
-
-                                                return (
-                                                    <DayCell
-                                                        key={`${day.year}-${day.month}-${day.day}`}
-                                                        day={day}
-                                                        isSelectedDay={dateStatus.isSelected || dateStatus.isInInterval}
-                                                        isToday={day.date.getTime() === todayTime}
-                                                        weatherKind={dayWeather?.kind ?? null}
-                                                        isTypicalWeather={!!dayWeather?.isTypical}
-                                                        weatherTitle={dayWeather?.title}
-                                                        startingIntervalId={startingCity ? startingInterval!.id : null}
-                                                        startingCity={startingCity}
-                                                        isCityPickerOpen={
-                                                            !!startingInterval &&
-                                                            startingInterval.id === cityPickerIntervalId
-                                                        }
-                                                        onDateClick={onDateClick}
-                                                        onCityLabelClick={onCityLabelClick}
-                                                    />
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
+                    <CalendarGrid
+                        weeks={weeks}
+                        visibleFrom={visibleFrom}
+                        selectedStart={selectedStart}
+                        intervals={intervals}
+                        cities={cities}
+                        cityPickerIntervalId={cityPickerIntervalId}
+                        weatherByDay={weatherByDay}
+                        todayTime={todayTime}
+                        onDateClick={onDateClick}
+                        onCityLabelClick={onCityLabelClick}
+                        onMonthClick={onMonthClick}
+                        onShowMorePast={showMorePast}
+                    />
                 </div>
 
                 {/* Intervals panel - wide screens only */}
