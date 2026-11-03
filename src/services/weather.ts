@@ -100,26 +100,14 @@ export const getCityById = async (id: number): Promise<City | null> => {
 };
 
 // Daily weather code is the most severe hourly one, so a single overcast hour (at night too) makes a sunny day
-// overcast. Days without precipitation get the code by the share of sunshine in the daylight or by the mean cloud
-// cover if there is no sunshine data. The code only gets lower, never cloudier than the API one.
-const getDayCloudCode = (
-    code: number,
-    sunshine: number | null,
-    daylight: number | null,
-    cloudCover: number | null
-): number => {
-    if (code > 3) {
+// overcast. Days without precipitation get the code by the mean cloud cover: compared with the total cloud cover
+// observed at weather stations it is right much more often than the share of sunshine, which makes days too clear.
+// The code only gets lower, never cloudier than the API one.
+const getDayCloudCode = (code: number, cloudCover: number | null): number => {
+    if (code > 3 || cloudCover === null) {
         return code;
     }
-    let dayCode: number;
-    if (sunshine !== null && daylight) {
-        const sunshineShare = sunshine / daylight;
-        dayCode = sunshineShare >= 0.85 ? 0 : sunshineShare >= 0.6 ? 1 : sunshineShare >= 0.3 ? 2 : 3;
-    } else if (cloudCover !== null) {
-        dayCode = cloudCover < 20 ? 0 : cloudCover < 45 ? 1 : cloudCover < 80 ? 2 : 3;
-    } else {
-        return code;
-    }
+    const dayCode = cloudCover < 20 ? 0 : cloudCover < 45 ? 1 : cloudCover < 80 ? 2 : 3;
     return Math.min(code, dayCode);
 };
 
@@ -128,7 +116,7 @@ const fetchDaily = async (url: string, city: City, range: Record<string, string>
     const params = new URLSearchParams({
         latitude: city.latitude.toString(),
         longitude: city.longitude.toString(),
-        daily: 'weather_code,temperature_2m_max,temperature_2m_min,cloud_cover_mean,sunshine_duration,daylight_duration',
+        daily: 'weather_code,temperature_2m_max,temperature_2m_min,cloud_cover_mean',
         timezone: 'auto',
         ...range,
     });
@@ -143,8 +131,6 @@ const fetchDaily = async (url: string, city: City, range: Record<string, string>
             temperature_2m_max: (number | null)[];
             temperature_2m_min: (number | null)[];
             cloud_cover_mean: (number | null)[];
-            sunshine_duration: (number | null)[];
-            daylight_duration: (number | null)[];
         };
     } = await response.json();
 
@@ -155,12 +141,7 @@ const fetchDaily = async (url: string, city: City, range: Record<string, string>
             return;
         }
         result[date] = {
-            code: getDayCloudCode(
-                code,
-                data.daily.sunshine_duration[index],
-                data.daily.daylight_duration[index],
-                data.daily.cloud_cover_mean[index]
-            ),
+            code: getDayCloudCode(code, data.daily.cloud_cover_mean[index]),
             tMax: data.daily.temperature_2m_max[index] ?? NaN,
             tMin: data.daily.temperature_2m_min[index] ?? NaN,
         };
@@ -196,7 +177,7 @@ interface Archive {
 
 const archives = new Map<number, Promise<Archive>>();
 
-// Archive and forecast stored before the cloud codes were corrected by sunshine
+// Archive and forecast stored with the previous cloud codes (uncorrected, then corrected by sunshine)
 const legacyCacheRemoved = new Set<number>();
 const removeLegacyCache = (cityId: number) => {
     if (legacyCacheRemoved.has(cityId)) {
@@ -205,13 +186,15 @@ const removeLegacyCache = (cityId: number) => {
     legacyCacheRemoved.add(cityId);
     void removeWeatherCache(`archive:${cityId}`);
     void removeWeatherCache(`forecast:${cityId}`);
+    void removeWeatherCache(`archive2:${cityId}`);
+    void removeWeatherCache(`forecast2:${cityId}`);
 };
 
 const loadArchive = (cityId: number): Promise<Archive> => {
     let archive = archives.get(cityId);
     if (!archive) {
         removeLegacyCache(cityId);
-        archive = readWeatherCache<Archive['days']>(`archive2:${cityId}`).then((days) => ({
+        archive = readWeatherCache<Archive['days']>(`archive3:${cityId}`).then((days) => ({
             days: days ?? {},
             pending: new Map(),
         }));
@@ -262,7 +245,7 @@ const fetchArchiveWeather = async (city: City, start: Date, end: Date): Promise<
                         archive.days[date] = null;
                     }
                 });
-                void writeWeatherCache(`archive2:${city.id}`, archive.days);
+                void writeWeatherCache(`archive3:${city.id}`, archive.days);
             })
             .finally(() => runDates.forEach((date) => archive.pending.delete(date)));
         runDates.forEach((date) => archive.pending.set(date, request));
@@ -305,7 +288,7 @@ const fetchForecastWeather = (city: City): Promise<WeatherByDate> => {
     request.promise = (async () => {
         removeLegacyCache(city.id);
         const stored = await readWeatherCache<Omit<ForecastRequest, 'promise'> & { days: WeatherByDate }>(
-            `forecast2:${city.id}`
+            `forecast3:${city.id}`
         );
         if (stored && stored.start === startDate && request.fetchedAt - stored.fetchedAt < FORECAST_TTL) {
             request.fetchedAt = stored.fetchedAt;
@@ -321,7 +304,7 @@ const fetchForecastWeather = (city: City): Promise<WeatherByDate> => {
         if (Object.keys(days).length === 0) {
             throw new Error('Forecast is empty');
         }
-        void writeWeatherCache(`forecast2:${city.id}`, { start: startDate, fetchedAt: request.fetchedAt, days });
+        void writeWeatherCache(`forecast3:${city.id}`, { start: startDate, fetchedAt: request.fetchedAt, days });
         return days;
     })();
     // Allow retry on failure
