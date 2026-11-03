@@ -1,7 +1,8 @@
-import { type MouseEvent, type ReactNode, useEffect, useMemo, useRef } from 'react';
+import { type MouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 
-import { ChevronRight, MapPin, Settings, Trash2, X } from 'lucide-react';
+import { ChevronRight, CircleHelp, MapPin, Settings, Trash2, X } from 'lucide-react';
 
+import { AboutDialog } from '@/components/AboutDialog';
 import { CityPicker } from '@/components/CityPicker';
 import { Collapse, COLLAPSE_MS } from '@/components/Collapse';
 import { useListPresence } from '@/hooks/usePresence';
@@ -153,6 +154,7 @@ export function IntervalsPanel({
         return items;
     }, [intervals, pendingStart]);
     const listEntries = useListPresence(listItems, getItemKey, COLLAPSE_MS);
+    const [isAboutOpen, setIsAboutOpen] = useState(false);
 
     const toggleCityPicker = (pickerId: string) =>
         cityPickerIntervalId === pickerId ? onCloseCityPicker() : onOpenCityPicker(pickerId);
@@ -298,6 +300,18 @@ export function IntervalsPanel({
                         <div className="px-3 pt-1 pb-3">{settings}</div>
                     </div>
                 </div>
+            </section>
+
+            <section className="-mt-4 rounded-xl bg-zinc-50">
+                <button
+                    className={`group w-full p-3 flex items-center gap-2 text-left text-sm text-slate-600 rounded-xl ${ROW_BUTTON_CLASS}`}
+                    aria-haspopup="dialog"
+                    onClick={() => setIsAboutOpen(true)}
+                >
+                    <CircleHelp className="w-5 h-5 flex-shrink-0 group-hover:text-blue-600 transition-colors" />
+                    <span className="flex-1 group-hover:text-blue-600 transition-colors">About the weather</span>
+                </button>
+                <AboutDialog open={isAboutOpen} onClose={() => setIsAboutOpen(false)} />
             </section>
         </div>
     );
